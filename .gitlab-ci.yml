@@ -40,9 +40,11 @@ compose-config:
   extends: .on-merge-and-branches
   stage: lint
   image: docker:27.5.0
-  variables:
-    GRAFANA_ADMIN_PASSWORD: "ci-placeholder"
   script:
+    # Значение нужно только чтобы прошла обязательная подстановка; настоящее
+    # приходит из INFRA_ENV. Литерала в файле нет намеренно — на строку вида
+    # PASSWORD: "..." срабатывает gitleaks, и он в этом прав.
+    - export GRAFANA_ADMIN_PASSWORD="$(head -c 12 /dev/urandom | base64)"
     - docker compose config --quiet
 
 alloy-fmt:
