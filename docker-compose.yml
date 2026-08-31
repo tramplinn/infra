@@ -16,7 +16,9 @@ services:
     restart: unless-stopped
     logging: *logging
     environment:
-      ACME_EMAIL: ${ACME_EMAIL:-}
+      # Пустое значение роняет разбор Caddyfile на директиве email,
+      # поэтому переменная обязательна и сообщение об этом явное.
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL}
       PROD_DOMAIN: ${PROD_DOMAIN:-prod.localhost}
       STAGE_DOMAIN: ${STAGE_DOMAIN:-stage.localhost}
       API_PROD_UPSTREAM: ${API_PROD_UPSTREAM:-tramplin-prod-api:8000}

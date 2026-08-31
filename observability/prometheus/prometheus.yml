@@ -1,5 +1,3 @@
-# Prometheus здесь только хранит и отдаёт: собирает всё Alloy и присылает
-# remote_write, поэтому scrape_configs почти пуст.
 global:
   scrape_interval: 30s
   evaluation_interval: 30s

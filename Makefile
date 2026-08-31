@@ -21,12 +21,10 @@ logs:
 build:
 	$(COMPOSE) build caddy
 
-# Полная проверка конфигов без запуска стенда.
 validate:
 	$(COMPOSE) config --quiet
 	$(COMPOSE) run --rm --no-deps --entrypoint caddy caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile
 	$(COMPOSE) run --rm --no-deps --entrypoint alloy alloy fmt /etc/alloy/config.alloy > /dev/null
 
-# Grafana и Prometheus наружу не смотрят: SERVER_IP=1.2.3.4 make tunnel
 tunnel:
 	$(SSH) -N -L 3000:127.0.0.1:3000 -L 9090:127.0.0.1:9090
