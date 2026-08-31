@@ -32,6 +32,7 @@ compose-config:
   image: docker:27.5.0
   script:
     - export GRAFANA_ADMIN_PASSWORD="$(head -c 12 /dev/urandom | base64)"
+    - export ACME_EMAIL=ci@example.com
     - docker compose config --quiet
 
 alloy-fmt:
