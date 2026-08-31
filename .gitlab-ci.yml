@@ -1,0 +1,120 @@
+# Tramplin — пограничный стенд: прокси и наблюдаемость.
+#
+# Переменные проекта (Settings → CI/CD → Variables), все Protected:
+#   SERVER_IP        адрес сервера
+#   SSH_PRIVATE_KEY  приватный ключ user1, base64 одной строкой (Masked)
+#   INFRA_ENV        .env стенда — тип File: в джобе $INFRA_ENV это путь к файлу,
+#                    который GitLab создаёт из значения переменной
+#
+# INFRA_ENV обязан содержать GRAFANA_ADMIN_PASSWORD, ACME_EMAIL и домены
+# PROD_DOMAIN / STAGE_DOMAIN. CADDY_IMAGE подставляет сам пайплайн.
+
+stages:
+  - lint
+  - build
+  - deploy
+
+default:
+  tags:
+    - docker
+    - linux
+
+variables:
+  CADDY_IMAGE: "$CI_REGISTRY_IMAGE/caddy:$CI_COMMIT_REF_SLUG"
+  SSH_USER: "user1"
+  SSH_PORT: "15945"
+  DEPLOY_PATH: "/home/user1/apps/infra"
+
+.on-merge-and-branches:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: "$CI_COMMIT_BRANCH"
+
+.on-main:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+# --- проверки --------------------------------------------------------------
+
+compose-config:
+  extends: .on-merge-and-branches
+  stage: lint
+  image: docker:27.5.0
+  variables:
+    GRAFANA_ADMIN_PASSWORD: "ci-placeholder"
+  script:
+    - docker compose config --quiet
+
+alloy-fmt:
+  extends: .on-merge-and-branches
+  stage: lint
+  image:
+    name: grafana/alloy:v1.19.2
+    entrypoint: [""]
+  script:
+    - alloy fmt observability/alloy/config.alloy > /dev/null
+
+gitleaks:
+  extends: .on-merge-and-branches
+  stage: lint
+  image:
+    name: zricethezav/gitleaks:v8.18.2
+    entrypoint: [""]
+  script:
+    - gitleaks detect --source . --no-git --verbose --redact
+
+# Конфиги контейнеров и compose на типовые ошибки безопасности.
+trivy-config:
+  extends: .on-merge-and-branches
+  stage: lint
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  script:
+    - trivy config --severity HIGH,CRITICAL --exit-code 1 .
+
+# --- сборка ----------------------------------------------------------------
+
+# Свой образ нужен из-за rate_limit: в официальном Caddy этого модуля нет.
+build-caddy:
+  extends: .on-main
+  stage: build
+  image: docker:27.5.0
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+  script:
+    - docker build --pull -t "$CADDY_IMAGE" caddy
+    - docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest
+      image --severity HIGH,CRITICAL --exit-code 1 "$CADDY_IMAGE"
+    # Конфиг проверяем тем же бинарником, который поедет в прод.
+    - docker run --rm -v "$CI_PROJECT_DIR/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" "$CADDY_IMAGE"
+      caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile
+    - docker push "$CADDY_IMAGE"
+  after_script:
+    - docker logout "$CI_REGISTRY"
+
+# --- деплой ----------------------------------------------------------------
+
+deploy:
+  extends: .on-main
+  stage: deploy
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache openssh-client
+    - eval $(ssh-agent -s)
+    - echo "$SSH_PRIVATE_KEY" | base64 -d | ssh-add -
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    - printf 'Host *\n  Port %s\n  StrictHostKeyChecking accept-new\n' "$SSH_PORT" > ~/.ssh/config
+    - chmod 600 ~/.ssh/config
+  script:
+    - ssh "$SSH_USER@$SERVER_IP" "mkdir -p $DEPLOY_PATH"
+    - scp -r docker-compose.yml caddy observability scripts "$SSH_USER@$SERVER_IP:$DEPLOY_PATH/"
+    - scp "$INFRA_ENV" "$SSH_USER@$SERVER_IP:$DEPLOY_PATH/.env"
+    - ssh "$SSH_USER@$SERVER_IP" "chmod 600 $DEPLOY_PATH/.env"
+    - printf '%s' "$CI_REGISTRY_PASSWORD" |
+      ssh "$SSH_USER@$SERVER_IP" "docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY"
+    - ssh "$SSH_USER@$SERVER_IP"
+      "CADDY_IMAGE=$CADDY_IMAGE CI_REGISTRY=$CI_REGISTRY bash $DEPLOY_PATH/scripts/deploy.sh"
+  environment:
+    name: edge
+    url: "https://$PROD_DOMAIN"

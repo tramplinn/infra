@@ -1,0 +1,82 @@
+# Точка входа: TLS, лимиты и заголовки — здесь, приложение об этом не знает.
+# Домены приходят окружением из .env, поэтому файл одинаков на всех стендах.
+
+{
+	email {$ACME_EMAIL}
+
+	# Admin API нужен Alloy для метрик. Наружу порт 2019 не публикуется,
+	# он доступен только контейнерам внутренней сети.
+	admin :2019
+	servers {
+		metrics
+	}
+
+	# rate_limit — сторонний модуль, его место в цепочке нужно задать явно.
+	order rate_limit before basicauth
+
+	log {
+		output stdout
+		format json
+	}
+}
+
+# Общий профиль для API. Аргумент — адрес апстрима.
+(api) {
+	# text/event-stream в список намеренно не входит: сжатие ломает поток
+	# ответа ассистента.
+	encode {
+		zstd
+		gzip
+		match {
+			header Content-Type application/json*
+			header Content-Type application/javascript*
+			header Content-Type text/html*
+			header Content-Type text/css*
+			header Content-Type text/plain*
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# Тело режется здесь: FastAPI вычитывает загрузку целиком в память
+	# и сверяет размер уже после этого.
+	request_body {
+		max_size 10MB
+	}
+
+	rate_limit {
+		zone api {
+			key {remote_host}
+			events 120
+			window 1m
+		}
+	}
+
+	reverse_proxy {args[0]} {
+		# Заголовок именно перезаписывается, а не дополняется: клиент не должен
+		# уметь подложить чужой адрес в гостевую квоту ассистента.
+		header_up X-Forwarded-For {remote_host}
+
+		# Ответ ассистента идёт SSE, буферизация его сломала бы.
+		flush_interval -1
+	}
+}
+
+{$PROD_DOMAIN:prod.localhost} {
+	import api {$API_PROD_UPSTREAM:tramplin-prod-api:8000}
+}
+
+{$STAGE_DOMAIN:stage.localhost} {
+	import api {$API_STAGE_UPSTREAM:tramplin-stage-api:8000}
+}
+
+# Фронтенд появится здесь же — отдельным блоком со своим апстримом:
+# {$FRONTEND_DOMAIN} {
+# 	import api tramplin-frontend:80
+# }
