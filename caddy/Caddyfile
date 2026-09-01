@@ -61,7 +61,3 @@
 {$STAGE_DOMAIN:stage.localhost} {
 	import api {$API_STAGE_UPSTREAM:tramplin-stage-api:8000}
 }
-
-# {$FRONTEND_DOMAIN} {
-# 	import api tramplin-frontend:80
-# }

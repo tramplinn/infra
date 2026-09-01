@@ -7,8 +7,6 @@ FROM caddy:alpine
 
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy
 
-# Базовый образ отстаёт от репозитория alpine на несколько исправлений
-# безопасности, поэтому пакеты обновляем на этапе сборки.
 RUN apk upgrade --no-cache \
     && apk add --no-cache --virtual .setcap libcap \
     && setcap cap_net_bind_service=+ep /usr/bin/caddy \

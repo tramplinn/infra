@@ -3,8 +3,6 @@ logging {
 	format = "logfmt"
 }
 
-// ---------- логи ----------
-
 discovery.docker "containers" {
 	host             = "tcp://dockerproxy:2375"
 	refresh_interval = "15s"
@@ -43,8 +41,6 @@ loki.write "default" {
 	}
 }
 
-// ---------- метрики ----------
-
 prometheus.exporter.unix "host" {
 	rootfs_path = "/rootfs"
 	procfs_path = "/host/proc"
@@ -80,7 +76,7 @@ prometheus.scrape "caddy" {
 prometheus.remote_write "default" {
 	endpoint {
 		url = "http://prometheus:9090/api/v1/write"
-		
+
 		write_relabel_config {
 			target_label = "instance"
 			replacement  = "tramplin"

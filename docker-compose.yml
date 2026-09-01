@@ -1,70 +1,59 @@
-# Пограничный стенд: прокси перед API обеих сред и наблюдаемость.
-# Приложения живут в своих проектах compose и подключаются к сети tramplin-edge.
 name: tramplin-infra
 
-x-logging: &logging
-  driver: json-file
-  options:
-    max-size: "10m"
-    max-file: "3"
+x-service: &service
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+  networks:
+    - internal
 
 services:
   caddy:
+    <<: *service
     image: ${CADDY_IMAGE:-tramplin-caddy:local}
     build:
       context: ./caddy
-    restart: unless-stopped
-    logging: *logging
+    networks:
+      - edge
+      - internal
     environment:
-      # Пустое значение роняет разбор Caddyfile на директиве email,
-      # поэтому переменная обязательна и сообщение об этом явное.
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL}
       PROD_DOMAIN: ${PROD_DOMAIN:-prod.localhost}
       STAGE_DOMAIN: ${STAGE_DOMAIN:-stage.localhost}
       API_PROD_UPSTREAM: ${API_PROD_UPSTREAM:-tramplin-prod-api:8000}
       API_STAGE_UPSTREAM: ${API_STAGE_UPSTREAM:-tramplin-stage-api:8000}
     ports:
-      # EDGE_BIND_HOST оставляют пустым в проде и ставят 127.0.0.1, когда стенд
-      # поднимают для проверки и наружу его светить не надо.
       - "${EDGE_BIND_HOST:-0.0.0.0}:${HTTP_PORT:-80}:80"
       - "${EDGE_BIND_HOST:-0.0.0.0}:${HTTPS_PORT:-443}:443"
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
-    networks:
-      - edge
-      - internal
-    mem_limit: 256m
-    security_opt:
-      - no-new-privileges:true
     stop_grace_period: 20s
+    mem_limit: 256m
 
-  # Прямой доступ к сокету докера имеет только этот контейнер, и только на чтение.
   dockerproxy:
+    <<: *service
     image: tecnativa/docker-socket-proxy:v0.5.0
-    restart: unless-stopped
-    logging: *logging
     environment:
       CONTAINERS: 1
       IMAGES: 1
       INFO: 1
       EVENTS: 1
-      # discovery.docker в Alloy читает сети, чтобы разметить цели.
       NETWORKS: 1
       POST: 0
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks:
-      - internal
     mem_limit: 64m
-    security_opt:
-      - no-new-privileges:true
 
   alloy:
+    <<: *service
     image: grafana/alloy:v1.19.2
-    restart: unless-stopped
-    logging: *logging
     command:
       - run
       - --server.http.listen-addr=0.0.0.0:12345
@@ -73,27 +62,17 @@ services:
     volumes:
       - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
       - alloy_data:/var/lib/alloy/data
-      # Метрики хоста и контейнеров читаются из procfs и cgroups; сокет докера
-      # сюда намеренно не попадает, метаданные берутся через dockerproxy.
       - /:/rootfs:ro
       - /proc:/host/proc:ro
-      # Два пути к /sys не опечатка: node-exporter читает /host/sys, cadvisor —
-      # /sys по фиксированному пути.
       - /sys:/sys:ro
       - /sys:/host/sys:ro
       - /var/lib/docker:/var/lib/docker:ro
       - /run/udev:/run/udev:ro
-      # Docker 29 держит контейнеры через containerd, и без этого сокета cadvisor
-      # видит только корневую cgroup вместо контейнеров.
       - /run/containerd/containerd.sock:/run/containerd/containerd.sock:ro
-    # Без хостового пространства cgroup контейнерные метрики пустые.
     cgroup: host
     depends_on:
       - loki
       - prometheus
-    networks:
-      - internal
-    # У образа нет ни wget, ни curl — стучимся в порт средствами bash.
     healthcheck:
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/12345"]
       interval: 15s
@@ -101,49 +80,35 @@ services:
       retries: 5
       start_period: 20s
     mem_limit: 256m
-    security_opt:
-      - no-new-privileges:true
 
   prometheus:
+    <<: *service
     image: prom/prometheus:v3.14.0
-    restart: unless-stopped
-    logging: *logging
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=15d
       - --storage.tsdb.retention.size=2GB
-      # Метрики присылает Alloy, а не собирает сам Prometheus.
       - --web.enable-remote-write-receiver
     volumes:
       - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     ports:
       - "127.0.0.1:9090:9090"
-    networks:
-      - internal
     mem_limit: 640m
-    security_opt:
-      - no-new-privileges:true
 
   loki:
+    <<: *service
     image: grafana/loki:3.7
-    restart: unless-stopped
-    logging: *logging
     command: ["-config.file=/etc/loki/loki.yml"]
     volumes:
       - ./observability/loki/loki.yml:/etc/loki/loki.yml:ro
       - loki_data:/loki
-    networks:
-      - internal
     mem_limit: 384m
-    security_opt:
-      - no-new-privileges:true
 
   grafana:
+    <<: *service
     image: grafana/grafana:13.1
-    restart: unless-stopped
-    logging: *logging
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}
       GF_USERS_ALLOW_SIGN_UP: "false"
@@ -154,21 +119,14 @@ services:
       - grafana_data:/var/lib/grafana
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
-    # Наружу не публикуется: Grafana открывается через ssh-туннель, см. README.
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
       - prometheus
       - loki
-    networks:
-      - internal
     mem_limit: 384m
-    security_opt:
-      - no-new-privileges:true
 
 networks:
-  # Общая сеть с приложениями. Создаётся при развёртывании, живёт отдельно от
-  # проектов compose, поэтому переживает пересборку любого из них.
   edge:
     external: true
     name: tramplin-edge
