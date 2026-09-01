@@ -14,7 +14,7 @@
 	}
 }
 
-(api) {
+(proxy) {
 	encode {
 		zstd
 		gzip
@@ -40,9 +40,9 @@
 	}
 
 	rate_limit {
-		zone api {
+		zone {args[1]} {
 			key {remote_host}
-			events 120
+			events {args[2]}
 			window 1m
 		}
 	}
@@ -54,10 +54,18 @@
 	}
 }
 
+{$FRONTEND_DOMAIN:web.localhost} {
+	import proxy {$WEB_PROD_UPSTREAM:tramplin-prod-web:80} web_prod 600
+}
+
 {$PROD_DOMAIN:prod.localhost} {
-	import api {$API_PROD_UPSTREAM:tramplin-prod-api:8000}
+	import proxy {$API_PROD_UPSTREAM:tramplin-prod-api:8000} api_prod 120
+}
+
+{$FRONTEND_STAGE_DOMAIN:web-stage.localhost} {
+	import proxy {$WEB_STAGE_UPSTREAM:tramplin-stage-web:80} web_stage 600
 }
 
 {$STAGE_DOMAIN:stage.localhost} {
-	import api {$API_STAGE_UPSTREAM:tramplin-stage-api:8000}
+	import proxy {$API_STAGE_UPSTREAM:tramplin-stage-api:8000} api_stage 120
 }
