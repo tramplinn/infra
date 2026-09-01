@@ -23,9 +23,13 @@ services:
       - internal
     environment:
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL}
+      FRONTEND_DOMAIN: ${FRONTEND_DOMAIN:-web.localhost}
       PROD_DOMAIN: ${PROD_DOMAIN:-prod.localhost}
+      FRONTEND_STAGE_DOMAIN: ${FRONTEND_STAGE_DOMAIN:-web-stage.localhost}
       STAGE_DOMAIN: ${STAGE_DOMAIN:-stage.localhost}
+      WEB_PROD_UPSTREAM: ${WEB_PROD_UPSTREAM:-tramplin-prod-web:80}
       API_PROD_UPSTREAM: ${API_PROD_UPSTREAM:-tramplin-prod-api:8000}
+      WEB_STAGE_UPSTREAM: ${WEB_STAGE_UPSTREAM:-tramplin-stage-web:80}
       API_STAGE_UPSTREAM: ${API_STAGE_UPSTREAM:-tramplin-stage-api:8000}
     ports:
       - "${EDGE_BIND_HOST:-0.0.0.0}:${HTTP_PORT:-80}:80"

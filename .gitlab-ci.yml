@@ -34,6 +34,25 @@ compose-config:
     - export GRAFANA_ADMIN_PASSWORD="$(head -c 12 /dev/urandom | base64)"
     - docker compose config --quiet
 
+caddyfile-env:
+  extends: .on-merge-and-branches
+  stage: lint
+  image: python:3.13-slim
+  script:
+    - |
+      python - <<'EOF'
+      import re, sys, pathlib
+      caddyfile = pathlib.Path("caddy/Caddyfile").read_text()
+      compose = pathlib.Path("docker-compose.yml").read_text()
+      block = compose.split("environment:", 1)[1].split("ports:", 1)[0]
+      passed = set(re.findall(r"^\s+([A-Z][A-Z0-9_]*):", block, re.M))
+      used = set(re.findall(r"\{\$([A-Z][A-Z0-9_]*)", caddyfile))
+      missing = sorted(used - passed)
+      if missing:
+          sys.exit("не передаются сервису caddy в docker-compose.yml: " + ", ".join(missing))
+      print(f"плейсхолдеров в Caddyfile: {len(used)}, все переданы")
+      EOF
+
 alloy-fmt:
   extends: .on-merge-and-branches
   stage: lint
