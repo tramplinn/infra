@@ -69,12 +69,10 @@ build-caddy:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
   script:
     - docker build --pull -t "$CI_REGISTRY_IMAGE/caddy:$CI_COMMIT_SHORT_SHA" caddy
-    - docker run --rm -i -v /var/run/docker.sock:/var/run/docker.sock
-      -e CI_REGISTRY_IMAGE -e CI_COMMIT_SHORT_SHA
-      --entrypoint sh aquasec/trivy:0.74.0
-      -c 'cat > /tmp/trivyignore && trivy image --ignorefile /tmp/trivyignore
-      --severity HIGH,CRITICAL --exit-code 1 "$CI_REGISTRY_IMAGE/caddy:$CI_COMMIT_SHORT_SHA"'
-      < .trivyignore
+    - docker run --rm -v /var/run/docker.sock:/var/run/docker.sock
+      aquasec/trivy:0.74.0 image --scanners vuln
+      --severity HIGH,CRITICAL --exit-code 1
+      "$CI_REGISTRY_IMAGE/caddy:$CI_COMMIT_SHORT_SHA"
     - docker run --rm -i -e ACME_EMAIL=ci@example.com
       --entrypoint sh "$CI_REGISTRY_IMAGE/caddy:$CI_COMMIT_SHORT_SHA"
       -c 'cat > /tmp/Caddyfile && caddy validate --adapter caddyfile --config /tmp/Caddyfile'

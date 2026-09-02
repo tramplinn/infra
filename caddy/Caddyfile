@@ -2,9 +2,7 @@
 	email {$ACME_EMAIL}
 
 	admin :2019
-	servers {
-		metrics
-	}
+	metrics
 
 	order rate_limit before basicauth
 
@@ -48,7 +46,6 @@
 	}
 
 	reverse_proxy {$WEB_PROD_UPSTREAM:tramplin-prod-web:80} {
-		header_up X-Forwarded-For {remote_host}
 		flush_interval -1
 	}
 }
@@ -83,7 +80,6 @@
 		}
 	}
 	reverse_proxy {$API_PROD_UPSTREAM:tramplin-prod-api:8000} {
-		header_up X-Forwarded-For {remote_host}
 		flush_interval -1
 	}
 }
@@ -118,7 +114,6 @@
 		}
 	}
 	reverse_proxy {$WEB_STAGE_UPSTREAM:tramplin-stage-web:80} {
-		header_up X-Forwarded-For {remote_host}
 		flush_interval -1
 	}
 }
@@ -153,7 +148,6 @@
 		}
 	}
 	reverse_proxy {$API_STAGE_UPSTREAM:tramplin-stage-api:8000} {
-		header_up X-Forwarded-For {remote_host}
 		flush_interval -1
 	}
 }

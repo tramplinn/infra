@@ -1,9 +1,13 @@
-FROM caddy:2.11.3-builder-alpine AS builder
+FROM caddy:2.11.4-builder-alpine AS builder
 
 RUN xcaddy build \
-    --with github.com/mholt/caddy-ratelimit@v0.1.0
+    --with github.com/mholt/caddy-ratelimit@v0.1.0 \
+    --replace golang.org/x/crypto=golang.org/x/crypto@v0.56.0 \
+    --replace golang.org/x/net=golang.org/x/net@v0.58.0 \
+    --replace golang.org/x/text=golang.org/x/text@v0.41.0 \
+    --replace google.golang.org/grpc=google.golang.org/grpc@v1.83.2
 
-FROM caddy:2.11.3-alpine
+FROM caddy:2.11.4-alpine
 
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy
 
