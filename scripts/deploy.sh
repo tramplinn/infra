@@ -3,17 +3,23 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-: "${CADDY_IMAGE:?}" "${CI_REGISTRY:?}"
+if [ "$#" -ne 2 ]; then
+  echo "usage: $0 IMAGE REGISTRY" >&2
+  exit 2
+fi
 
-docker network inspect tramplin-edge >/dev/null 2>&1 || docker network create tramplin-edge
+caddy_image=$1
+registry=$2
 
-compose() {
-  docker compose --env-file .env "$@"
-}
+if ! docker network inspect tramplin-edge >/dev/null 2>&1; then
+  docker network create tramplin-edge
+fi
 
-compose config --quiet
-compose pull --quiet
-compose up -d --no-build --remove-orphans --wait --wait-timeout 180
+docker compose --env-file .env config --quiet
+docker pull "$caddy_image"
+docker tag "$caddy_image" tramplin-caddy:local
+docker compose --env-file .env pull --quiet --ignore-buildable
+docker compose --env-file .env up -d --no-build --remove-orphans --wait --wait-timeout 180
 
 docker image prune -f
-docker logout "$CI_REGISTRY"
+docker logout "$registry"

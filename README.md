@@ -1,8 +1,8 @@
 # Tramplin — infra
 
-Пограничный стенд: единственная точка входа снаружи и наблюдаемость за всем,
-что крутится на сервере. Приложения живут в своих репозиториях и своих проектах
-compose, здесь их нет.
+Общий инфраструктурный стенд: единственная точка входа снаружи, наблюдаемость,
+RabbitMQ для фоновых заданий и изолированный Judge0. Сами приложения и их частные
+хранилища живут в своих репозиториях и compose-проектах.
 
 ```
 интернет ──443──> caddy ──> tramplin-prod-api:8000   (сеть tramplin-edge)
@@ -16,6 +16,10 @@ compose, здесь их нет.
        логи контейнеров ──> alloy ─────┼──> loki ──┐
        метрики хоста и контейнеров ────┘           ├──> grafana (127.0.0.1:3000)
                             └──────> prometheus ───┘
+
+       backend outbox ──> rabbitmq ──> algorithm workers
+                                             │
+                                             └──> Judge0 API ──> execution worker
 ```
 
 Конфиги здесь описывают только механизм. Все «почему именно так» собраны в этом
@@ -50,6 +54,18 @@ compose, так что пересборка бэкенда её не трога�
 исключительно чтение (`POST: 0`). Alloy ходит за метаданными контейнеров через
 него, сам сокет не видит.
 
+**RabbitMQ** — общий транспорт фоновых заданий. Он доступен приложениям по имени
+`tramplin-rabbitmq` в сети `tramplin-edge`, но AMQP и management UI опубликованы
+только на loopback хоста. Каждый deployment использует отдельное имя очереди,
+поэтому stage и production workers не забирают задания друг друга.
+
+**Judge0** включается профилем `algorithm`. Его API доступен backend workers по
+внутреннему имени `tramplin-judge0` и не публикуется на хост. Собственный PostgreSQL,
+Redis и execution worker находятся в изолированной сети `judge0_internal`; execution
+worker не подключён к `tramplin-edge` и не видит хранилища приложения. Для Judge0
+используется фиксированный образ `1.13.1`, а опасные compiler options, arguments,
+additional files, callbacks и сеть пользовательских программ отключены.
+
 ## Почему в compose именно так
 
 | Место | Причина |
@@ -60,7 +76,6 @@ compose, так что пересборка бэкенда её не трога�
 | healthcheck `alloy` через `bash` и `/dev/tcp` | в образе нет ни `wget`, ни `curl` |
 | `ACME_EMAIL: ${ACME_EMAIL:?}` | пустое значение роняет разбор Caddyfile на директиве `email`, так отказ понятнее |
 | порты `grafana` и `prometheus` на `127.0.0.1` | наружу они не смотрят намеренно, доступ — через ssh-туннель |
-| `EDGE_BIND_HOST` | в проде пусто; `127.0.0.1` поднимает стенд, не публикуя его наружу |
 | `allowUiUpdates: false` у дашбордов | дашборд — часть репозитория, а не состояние Grafana; правки в интерфейсе не сохраняются |
 
 ## Пайплайн
@@ -72,21 +87,21 @@ compose, так что пересборка бэкенда её не трога�
 - `INFRA_ENV` — **тип File**, содержимое `.env`, см. `.env.example`. GitLab кладёт
   значение во временный файл, деплой копирует его на сервер как есть. Masked для
   многострочных значений включить нельзя, поэтому только Protected
+- `RABBITMQ_PASSWORD` хранится внутри `INFRA_ENV`; этот пароль используют backend workers
+- `JUDGE0_POSTGRES_PASSWORD`, `JUDGE0_REDIS_PASSWORD` и `JUDGE0_AUTH_TOKEN` также
+  хранятся в `INFRA_ENV`; последний передаётся algorithm workers как `JUDGE0_AUTH_TOKEN`
 
 Про сборку стоит знать два неочевидных места.
 
-**Образ получает два тега:** подвижный `CADDY_IMAGE` (по ветке) и неизменяемый
-`CADDY_IMAGE_SHA` (по коммиту). Тег по коммиту не только даёт воспроизводимый
-деплой и откат запуском старой джобы — он ещё и удерживает слои образа. Без него
-единственной ссылкой на слои был подвижный тег: сборка перезаписывала его,
-прошлый манифест повисал, сборщик мусора реестра сносил слои, а следующий push
-падал на `blob unknown to registry`, получив от реестра ответ, что такой слой
-у него уже есть. Разворачивается на сервер всегда тег по коммиту.
+Собранный Caddy получает один неизменяемый тег по коммиту. Путь образа строится
+из встроенных переменных GitLab, поэтому отдельная переменная для него не нужна.
+Перед запуском deploy-скрипт загружает этот образ и присваивает ему локальный тег,
+который указан в Compose.
 
 **Проверки образа получают файлы через stdin**, а не через `-v`:
 
 ```sh
-docker run --rm -i --entrypoint sh "$CADDY_IMAGE" -c "cat > /tmp/Caddyfile && caddy validate ..." < caddy/Caddyfile
+docker run --rm -i --entrypoint sh "$CI_REGISTRY_IMAGE/caddy:$CI_COMMIT_SHORT_SHA" -c "cat > /tmp/Caddyfile && caddy validate ..." < caddy/Caddyfile
 ```
 
 Джоба и демон докера не делят файловую систему, поэтому `-v "$PWD:/work"`
@@ -118,8 +133,9 @@ docker run --rm -i --entrypoint sh "$CADDY_IMAGE" -c "cat > /tmp/Caddyfile && ca
 ## Локально
 
 ```sh
-cp .env.example .env      # заполнить ACME_EMAIL и GRAFANA_ADMIN_PASSWORD
+cp .env.example .env      # заполнить все пароли и токены
 make up                   # соберёт caddy и поднимет весь стенд
+make up-algorithm         # дополнительно поднимет изолированный Judge0
 make validate             # проверить конфиги, ничего не запуская
 make down
 ```
@@ -137,9 +153,9 @@ SERVER_IP=213.171.31.1 make tunnel
 | Что | Где |
 |---|---|
 | Домен сайта и домен API | `.env`: `FRONTEND_DOMAIN` и `PROD_DOMAIN` (в GitLab — `INFRA_ENV`) |
-| Почта для сертификатов, пароль Grafana | `.env` (в GitLab — `INFRA_ENV`) |
-| Лимит запросов по сайтам | `caddy/Caddyfile`, третий аргумент `import proxy` |
-| Апстримы API, порты и адрес публикации | `.env`: `API_*_UPSTREAM`, `HTTP_PORT`, `HTTPS_PORT`, `EDGE_BIND_HOST` |
+| Почта для сертификатов, пароли Grafana/RabbitMQ/Judge0 | `.env` (в GitLab — `INFRA_ENV`) |
+| Лимит запросов по сайтам | `caddy/Caddyfile`, директива `events` нужного домена |
+| Апстримы API | `.env`: `API_PROD_UPSTREAM`, `API_STAGE_UPSTREAM` |
 | Лимит запросов, размер тела, заголовки | `caddy/Caddyfile` |
 | Срок хранения метрик | `docker-compose.yml`, флаги `prometheus` |
 | Срок хранения логов | `observability/loki/loki.yml`, `retention_period` |

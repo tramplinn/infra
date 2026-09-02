@@ -14,7 +14,7 @@
 	}
 }
 
-(proxy) {
+{$FRONTEND_DOMAIN:web.localhost} {
 	encode {
 		zstd
 		gzip
@@ -40,32 +40,120 @@
 	}
 
 	rate_limit {
-		zone {args[1]} {
+		zone web_prod {
 			key {remote_host}
-			events {args[2]}
+			events 600
 			window 1m
 		}
 	}
 
-	reverse_proxy {args[0]} {
+	reverse_proxy {$WEB_PROD_UPSTREAM:tramplin-prod-web:80} {
 		header_up X-Forwarded-For {remote_host}
-
 		flush_interval -1
 	}
 }
 
-{$FRONTEND_DOMAIN:web.localhost} {
-	import proxy {$WEB_PROD_UPSTREAM:tramplin-prod-web:80} web_prod 600
-}
-
 {$PROD_DOMAIN:prod.localhost} {
-	import proxy {$API_PROD_UPSTREAM:tramplin-prod-api:8000} api_prod 120
+	encode {
+		zstd
+		gzip
+		match {
+			header Content-Type application/json*
+			header Content-Type application/javascript*
+			header Content-Type text/html*
+			header Content-Type text/css*
+			header Content-Type text/plain*
+		}
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+	request_body {
+		max_size 10MB
+	}
+	rate_limit {
+		zone api_prod {
+			key {remote_host}
+			events 120
+			window 1m
+		}
+	}
+	reverse_proxy {$API_PROD_UPSTREAM:tramplin-prod-api:8000} {
+		header_up X-Forwarded-For {remote_host}
+		flush_interval -1
+	}
 }
 
 {$FRONTEND_STAGE_DOMAIN:web-stage.localhost} {
-	import proxy {$WEB_STAGE_UPSTREAM:tramplin-stage-web:80} web_stage 600
+	encode {
+		zstd
+		gzip
+		match {
+			header Content-Type application/json*
+			header Content-Type application/javascript*
+			header Content-Type text/html*
+			header Content-Type text/css*
+			header Content-Type text/plain*
+		}
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+	request_body {
+		max_size 10MB
+	}
+	rate_limit {
+		zone web_stage {
+			key {remote_host}
+			events 600
+			window 1m
+		}
+	}
+	reverse_proxy {$WEB_STAGE_UPSTREAM:tramplin-stage-web:80} {
+		header_up X-Forwarded-For {remote_host}
+		flush_interval -1
+	}
 }
 
 {$STAGE_DOMAIN:stage.localhost} {
-	import proxy {$API_STAGE_UPSTREAM:tramplin-stage-api:8000} api_stage 120
+	encode {
+		zstd
+		gzip
+		match {
+			header Content-Type application/json*
+			header Content-Type application/javascript*
+			header Content-Type text/html*
+			header Content-Type text/css*
+			header Content-Type text/plain*
+		}
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+	request_body {
+		max_size 10MB
+	}
+	rate_limit {
+		zone api_stage {
+			key {remote_host}
+			events 120
+			window 1m
+		}
+	}
+	reverse_proxy {$API_STAGE_UPSTREAM:tramplin-stage-api:8000} {
+		header_up X-Forwarded-For {remote_host}
+		flush_interval -1
+	}
 }

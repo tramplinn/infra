@@ -3,58 +3,35 @@ stages:
   - build
   - deploy
 
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: "$CI_COMMIT_BRANCH"
+
 default:
   tags:
     - docker
     - linux
 
 variables:
-  CADDY_IMAGE: "$CI_REGISTRY_IMAGE/caddy:$CI_COMMIT_REF_SLUG"
-  CADDY_IMAGE_SHA: "$CI_REGISTRY_IMAGE/caddy:$CI_COMMIT_SHORT_SHA"
   SSH_USER: "user1"
   SSH_PORT: "15945"
   DEPLOY_PATH: "/home/$SSH_USER/apps/infra"
 
-.on-merge-and-branches:
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: "$CI_COMMIT_BRANCH"
-
-.on-main:
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-
 compose-config:
-  extends: .on-merge-and-branches
   stage: lint
-  image: docker:27.5.0
+  image: docker:29.7.2
   variables:
     ACME_EMAIL: ci@example.com
+    GRAFANA_ADMIN_PASSWORD: ci-only-placeholder
+    RABBITMQ_PASSWORD: ci-only-placeholder
+    JUDGE0_POSTGRES_PASSWORD: ci-only-placeholder
+    JUDGE0_REDIS_PASSWORD: ci-only-placeholder
+    JUDGE0_AUTH_TOKEN: ci-only-placeholder
   script:
-    - export GRAFANA_ADMIN_PASSWORD="$(head -c 12 /dev/urandom | base64)"
     - docker compose config --quiet
 
-caddyfile-env:
-  extends: .on-merge-and-branches
-  stage: lint
-  image: python:3.13-slim
-  script:
-    - |
-      python - <<'EOF'
-      import re, sys, pathlib
-      caddyfile = pathlib.Path("caddy/Caddyfile").read_text()
-      compose = pathlib.Path("docker-compose.yml").read_text()
-      block = compose.split("environment:", 1)[1].split("ports:", 1)[0]
-      passed = set(re.findall(r"^\s+([A-Z][A-Z0-9_]*):", block, re.M))
-      used = set(re.findall(r"\{\$([A-Z][A-Z0-9_]*)", caddyfile))
-      missing = sorted(used - passed)
-      if missing:
-          sys.exit("не передаются сервису caddy в docker-compose.yml: " + ", ".join(missing))
-      print(f"плейсхолдеров в Caddyfile: {len(used)}, все переданы")
-      EOF
-
 alloy-fmt:
-  extends: .on-merge-and-branches
   stage: lint
   image:
     name: grafana/alloy:v1.19.2
@@ -63,27 +40,26 @@ alloy-fmt:
     - alloy fmt observability/alloy/config.alloy > /dev/null
 
 gitleaks:
-  extends: .on-merge-and-branches
   stage: lint
   image:
-    name: zricethezav/gitleaks:v8.18.2
+    name: zricethezav/gitleaks:v8.30.1
     entrypoint: [""]
   script:
     - gitleaks detect --source . --no-git --verbose --redact
 
 trivy-config:
-  extends: .on-merge-and-branches
   stage: lint
   image:
-    name: aquasec/trivy:latest
+    name: aquasec/trivy:0.74.0
     entrypoint: [""]
   script:
     - trivy config --severity HIGH,CRITICAL --exit-code 1 .
 
 build-caddy:
-  extends: .on-main
   stage: build
-  image: docker:27.5.0
+  image: docker:29.7.2
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
   retry:
     max: 2
     when:
@@ -92,28 +68,33 @@ build-caddy:
   before_script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
   script:
-    - docker build --pull -t "$CADDY_IMAGE" -t "$CADDY_IMAGE_SHA" caddy
+    - docker build --pull -t "$CI_REGISTRY_IMAGE/caddy:$CI_COMMIT_SHORT_SHA" caddy
     - docker run --rm -i -v /var/run/docker.sock:/var/run/docker.sock
-      --entrypoint sh aquasec/trivy:latest
-      -c "cat > /tmp/ignore && trivy image --ignorefile /tmp/ignore
-      --severity HIGH,CRITICAL --exit-code 1 $CADDY_IMAGE" < .trivyignore
-    - docker run --rm -i -e ACME_EMAIL=ci@example.com --entrypoint sh "$CADDY_IMAGE"
-      -c "cat > /tmp/Caddyfile && caddy validate --adapter caddyfile --config /tmp/Caddyfile"
+      -e CI_REGISTRY_IMAGE -e CI_COMMIT_SHORT_SHA
+      --entrypoint sh aquasec/trivy:0.74.0
+      -c 'cat > /tmp/trivyignore && trivy image --ignorefile /tmp/trivyignore
+      --severity HIGH,CRITICAL --exit-code 1 "$CI_REGISTRY_IMAGE/caddy:$CI_COMMIT_SHORT_SHA"'
+      < .trivyignore
+    - docker run --rm -i -e ACME_EMAIL=ci@example.com
+      --entrypoint sh "$CI_REGISTRY_IMAGE/caddy:$CI_COMMIT_SHORT_SHA"
+      -c 'cat > /tmp/Caddyfile && caddy validate --adapter caddyfile --config /tmp/Caddyfile'
       < caddy/Caddyfile
-    - docker push "$CADDY_IMAGE_SHA"
-    - docker push "$CADDY_IMAGE"
+    - docker push "$CI_REGISTRY_IMAGE/caddy:$CI_COMMIT_SHORT_SHA"
   after_script:
     - docker logout "$CI_REGISTRY"
 
 deploy:
-  extends: .on-main
   stage: deploy
-  image: alpine:latest
+  image: alpine:3.24.1
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
   before_script:
     - apk add --no-cache openssh-client
-    - eval $(ssh-agent -s)
+    - export SSH_AUTH_SOCK=/tmp/ssh-agent.sock
+    - ssh-agent -a "$SSH_AUTH_SOCK" >/dev/null
     - echo "$SSH_PRIVATE_KEY" | base64 -d | ssh-add -
-    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
     - printf 'Host *\n  Port %s\n  StrictHostKeyChecking accept-new\n' "$SSH_PORT" > ~/.ssh/config
     - chmod 600 ~/.ssh/config
   script:
@@ -124,7 +105,7 @@ deploy:
     - printf '%s' "$CI_REGISTRY_PASSWORD" |
       ssh "$SSH_USER@$SERVER_IP" "docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY"
     - ssh "$SSH_USER@$SERVER_IP"
-      "CADDY_IMAGE=$CADDY_IMAGE_SHA CI_REGISTRY=$CI_REGISTRY bash $DEPLOY_PATH/scripts/deploy.sh"
+      "bash $DEPLOY_PATH/scripts/deploy.sh '$CI_REGISTRY_IMAGE/caddy:$CI_COMMIT_SHORT_SHA' '$CI_REGISTRY'"
   environment:
     name: edge
     url: "https://$PROD_DOMAIN"

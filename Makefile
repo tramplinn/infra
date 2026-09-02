@@ -1,10 +1,13 @@
 COMPOSE = docker compose --env-file .env
 SSH = ssh -p 15945 user1@$(SERVER_IP)
 
-.PHONY: up down restart ps logs validate build tunnel
+.PHONY: up up-algorithm down restart ps logs validate build tunnel
 
 up:
 	$(COMPOSE) up -d --build --wait --wait-timeout 180
+
+up-algorithm:
+	$(COMPOSE) --profile algorithm up -d --build --wait --wait-timeout 180
 
 down:
 	$(COMPOSE) down
