@@ -1,5 +1,13 @@
 name: tramplin-infra
 
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-security: &default-security [no-new-privileges:true]
+
 services:
   rabbitmq:
     image: rabbitmq:4.3.5-management-alpine
@@ -25,16 +33,11 @@ services:
       start_period: 10s
     stop_grace_period: 30s
     mem_limit: 768m
-    security_opt: [no-new-privileges:true]
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    security_opt: *default-security
+    logging: *default-logging
 
   judge0-server:
     image: judge0/judge0:1.13.1
-    profiles: ["algorithm"]
     privileged: true
     security_opt: []
     restart: unless-stopped
@@ -54,17 +57,12 @@ services:
         condition: service_healthy
       judge0-redis:
         condition: service_healthy
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *default-logging
     stop_grace_period: 30s
     mem_limit: 512m
 
   judge0-worker:
     image: judge0/judge0:1.13.1
-    profiles: ["algorithm"]
     command: ["./scripts/workers"]
     privileged: true
     security_opt: []
@@ -82,18 +80,13 @@ services:
         condition: service_healthy
       judge0-redis:
         condition: service_healthy
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *default-logging
     stop_grace_period: 30s
     mem_limit: 2g
 
   judge0-db:
     image: postgres:18.6-alpine
     restart: unless-stopped
-    profiles: ["algorithm"]
     environment:
       POSTGRES_DB: judge0
       POSTGRES_USER: judge0
@@ -110,17 +103,12 @@ services:
       start_period: 10s
     stop_grace_period: 30s
     mem_limit: 512m
-    security_opt: [no-new-privileges:true]
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    security_opt: *default-security
+    logging: *default-logging
 
   judge0-redis:
     image: redis:8.10.1-alpine
     restart: unless-stopped
-    profiles: ["algorithm"]
     environment:
       REDIS_PASSWORD: ${JUDGE0_REDIS_PASSWORD:?set JUDGE0_REDIS_PASSWORD}
     command:
@@ -136,15 +124,11 @@ services:
       retries: 12
       start_period: 5s
     mem_limit: 128m
-    security_opt: [no-new-privileges:true]
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    security_opt: *default-security
+    logging: *default-logging
 
   caddy:
-    image: tramplin-caddy:local
+    image: ${CADDY_IMAGE:-tramplin-caddy:local}
     restart: unless-stopped
     build:
       context: ./caddy
@@ -170,12 +154,8 @@ services:
       - caddy_config:/config
     stop_grace_period: 20s
     mem_limit: 256m
-    security_opt: [no-new-privileges:true]
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    security_opt: *default-security
+    logging: *default-logging
 
   dockerproxy:
     image: ghcr.io/tecnativa/docker-socket-proxy:v0.5.0
@@ -191,12 +171,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     mem_limit: 64m
     networks: [internal]
-    security_opt: [no-new-privileges:true]
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    security_opt: *default-security
+    logging: *default-logging
 
   alloy:
     image: grafana/alloy:v1.19.2
@@ -228,12 +204,8 @@ services:
       start_period: 20s
     mem_limit: 256m
     networks: [internal]
-    security_opt: [no-new-privileges:true]
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    security_opt: *default-security
+    logging: *default-logging
 
   prometheus:
     image: prom/prometheus:v3.14.0
@@ -251,12 +223,8 @@ services:
       - "127.0.0.1:9090:9090"
     mem_limit: 640m
     networks: [internal]
-    security_opt: [no-new-privileges:true]
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    security_opt: *default-security
+    logging: *default-logging
 
   loki:
     image: grafana/loki:3.7.6
@@ -267,12 +235,8 @@ services:
       - loki_data:/loki
     mem_limit: 384m
     networks: [internal]
-    security_opt: [no-new-privileges:true]
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    security_opt: *default-security
+    logging: *default-logging
 
   grafana:
     image: grafana/grafana:13.1.3
@@ -294,12 +258,8 @@ services:
       - loki
     mem_limit: 384m
     networks: [internal]
-    security_opt: [no-new-privileges:true]
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    security_opt: *default-security
+    logging: *default-logging
 
 networks:
   edge:

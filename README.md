@@ -1,163 +1,95 @@
-# Tramplin — infra
+# Tramplin Infra
 
-Общий инфраструктурный стенд: единственная точка входа снаружи, наблюдаемость,
-RabbitMQ для фоновых заданий и изолированный Judge0. Сами приложения и их частные
-хранилища живут в своих репозиториях и compose-проектах.
+Общая инфраструктура Tramplin для staging и production.
 
-```
-интернет ──443──> caddy ──> tramplin-prod-api:8000   (сеть tramplin-edge)
-                    │  └──> tramplin-stage-api:8000
-                    │
-                    ├─ TLS, редирект с 80, HSTS
-                    ├─ rate limit 120 запросов в минуту на адрес
-                    ├─ тело запроса не больше 10 МБ
-                    └─ метрики :2019 ──┐
-                                       │
-       логи контейнеров ──> alloy ─────┼──> loki ──┐
-       метрики хоста и контейнеров ────┘           ├──> grafana (127.0.0.1:3000)
-                            └──────> prometheus ───┘
+## Сервисы
 
-       backend outbox ──> rabbitmq ──> algorithm workers
-                                             │
-                                             └──> Judge0 API ──> execution worker
+- Caddy — TLS, reverse proxy, security headers и rate limits;
+- RabbitMQ — очередь алгоритмических заданий;
+- Judge0 — изолированное выполнение кода;
+- Prometheus, Loki, Grafana и Alloy — метрики, логи и dashboards;
+- Docker socket proxy — read-only доступ Alloy к Docker API.
+
+Все приложения соединяются через внешнюю сеть `tramplin-edge`:
+
+```text
+internet → Caddy → frontend
+                 → backend API → RabbitMQ → algorithm worker → Judge0
+
+Alloy → Prometheus / Loki → Grafana
 ```
 
-Конфиги здесь описывают только механизм. Все «почему именно так» собраны в этом
-файле — комментариев в конфигах нет намеренно.
+Judge0 использует отдельную внутреннюю сеть и не видит базы или хранилища
+приложения. Его server и worker требуют Docker `privileged`.
 
-## Как это устроено
+## Запуск
 
-**Сеть `tramplin-edge`** — общая внешняя сеть докера. Caddy и контейнеры API
-подключены к ней, поэтому прокси ходит в приложение напрямую по имени, минуя
-порты хоста. Сеть создаёт `scripts/deploy.sh`, живёт она дольше любого проекта
-compose, так что пересборка бэкенда её не трогает.
+Нужны Docker, Compose plugin и Linux host.
 
-**Два публичных имени, не одно.** Голый домен отдаётся фронтенду
-(`FRONTEND_DOMAIN` → `tramplin-prod-web`), поддомен `api.` — бэкенду
-(`PROD_DOMAIN` → `tramplin-prod-api`). Браузер работает только с первым: SPA
-запрашивает `/api/`, и её nginx проксирует запрос в API по внутренней сети. Так
-всё остаётся на одном origin, а значит refresh-кука после OAuth-колбэка
-привязывается к тому же имени, на котором открыт сайт. Поддомен `api.` нужен для
-прямого доступа к API мимо фронта.
-
-**Свой образ Caddy** (`caddy/Dockerfile`) — в официальном нет модуля
-`rate_limit`, он сторонний и собирается через `xcaddy`. Базовый образ отстаёт
-от репозитория alpine на несколько исправлений безопасности, поэтому пакеты
-обновляются на этапе сборки (`apk upgrade`). Образ собирает CI и кладёт в
-реестр GitLab.
-
-**Alloy — единственный агент сбора.** Он же читает логи контейнеров, он же
-отдаёт метрики хоста (`node_exporter` внутри) и контейнеров (`cadvisor` внутри),
-он же скребёт метрики Caddy. Отдельные node-exporter и cadvisor не нужны.
-
-**Сокет докера** примонтирован только в `dockerproxy`, и тот пускает наружу
-исключительно чтение (`POST: 0`). Alloy ходит за метаданными контейнеров через
-него, сам сокет не видит.
-
-**RabbitMQ** — общий транспорт фоновых заданий. Он доступен приложениям по имени
-`tramplin-rabbitmq` в сети `tramplin-edge`, но AMQP и management UI опубликованы
-только на loopback хоста. Каждый deployment использует отдельное имя очереди,
-поэтому stage и production workers не забирают задания друг друга.
-
-**Judge0** включается профилем `algorithm`. Его API доступен backend workers по
-внутреннему имени `tramplin-judge0` и не публикуется на хост. Собственный PostgreSQL,
-Redis и execution worker находятся в изолированной сети `judge0_internal`; execution
-worker не подключён к `tramplin-edge` и не видит хранилища приложения. Для Judge0
-используется фиксированный образ `1.13.1`, а опасные compiler options, arguments,
-additional files, callbacks и сеть пользовательских программ отключены.
-
-## Почему в compose именно так
-
-| Место | Причина |
-|---|---|
-| у `alloy` два монтирования `/sys` — в `/sys` и в `/host/sys` | не опечатка: node-exporter читает `/host/sys`, cadvisor — `/sys` по фиксированному пути |
-| `cgroup: host` у `alloy` | без хостового пространства cgroup контейнерные метрики пустые |
-| `/run/containerd/containerd.sock` у `alloy` | Docker 29 держит контейнеры через containerd, без сокета cadvisor видит только корневую cgroup |
-| healthcheck `alloy` через `bash` и `/dev/tcp` | в образе нет ни `wget`, ни `curl` |
-| `ACME_EMAIL: ${ACME_EMAIL:?}` | пустое значение роняет разбор Caddyfile на директиве `email`, так отказ понятнее |
-| порты `grafana` и `prometheus` на `127.0.0.1` | наружу они не смотрят намеренно, доступ — через ssh-туннель |
-| `allowUiUpdates: false` у дашбордов | дашборд — часть репозитория, а не состояние Grafana; правки в интерфейсе не сохраняются |
-
-## Пайплайн
-
-Переменные проекта (Settings → CI/CD → Variables), все Protected:
-
-- `SERVER_IP` — адрес сервера
-- `SSH_PRIVATE_KEY` — приватный ключ `user1` в base64 одной строкой (Masked)
-- `INFRA_ENV` — **тип File**, содержимое `.env`, см. `.env.example`. GitLab кладёт
-  значение во временный файл, деплой копирует его на сервер как есть. Masked для
-  многострочных значений включить нельзя, поэтому только Protected
-- `RABBITMQ_PASSWORD` хранится внутри `INFRA_ENV`; этот пароль используют backend workers
-- `JUDGE0_POSTGRES_PASSWORD`, `JUDGE0_REDIS_PASSWORD` и `JUDGE0_AUTH_TOKEN` также
-  хранятся в `INFRA_ENV`; последний передаётся algorithm workers как `JUDGE0_AUTH_TOKEN`
-
-Про сборку стоит знать два неочевидных места.
-
-Собранный Caddy получает один неизменяемый тег по коммиту. Путь образа строится
-из встроенных переменных GitLab, поэтому отдельная переменная для него не нужна.
-Перед запуском deploy-скрипт загружает этот образ и присваивает ему локальный тег,
-который указан в Compose.
-
-**Проверка Caddyfile получает файл через stdin**, а не через `-v`:
-
-```sh
-docker run --rm -i --entrypoint sh "$CI_REGISTRY_IMAGE/caddy:$CI_COMMIT_SHORT_SHA" -c "cat > /tmp/Caddyfile && caddy validate ..." < caddy/Caddyfile
+```bash
+cp .env.example .env
+make validate
+make up
 ```
 
-Джоба и демон докера не делят файловую систему, поэтому `-v "$PWD:/work"`
-примонтировал бы пустоту. Trivy обращается к Docker напрямую через сокет и
-проверяет образ без исключений.
+`make up` создаёт общую сеть при первом запуске и поднимает полный стек, включая
+Judge0. Домены должны указывать на сервер до получения TLS-сертификатов.
 
-## Первый запуск
+Полезные команды:
 
-Порядок важен: сеть создаёт этот стенд, без неё бэкенд не поднимется.
-
-1. Завести перечисленные выше переменные проекта в GitLab.
-2. Влить в `main` — пайплайн соберёт образ и раскатает стенд в `/home/user1/apps/infra`.
-3. В `STAGE_ENV` и `PROD_ENV` бэкенда указать домены, на которые светит прокси
-   (`FRONTEND_BASE_URL`, `GITHUB_REDIRECT_URI`), и выкатить бэкенд.
-
-Домены должны указывать A-записями на сервер до первого запуска: Caddy
-запрашивает сертификат сразу и без работающего DNS будет получать отказ.
-Пока `PROD_DOMAIN` и `STAGE_DOMAIN` пусты, стенд слушает `*.localhost`
-с самоподписанным сертификатом и наружу ничего не выпускает.
-
-## Локально
-
-```sh
-cp .env.example .env      # заполнить все пароли и токены
-make up                   # соберёт caddy и поднимет весь стенд
-make up-algorithm         # дополнительно поднимет изолированный Judge0
-make validate             # проверить конфиги, ничего не запуская
-make down
+```bash
+make ps          # состояние сервисов
+make logs        # общие логи
+make restart     # перезапустить Caddy
+make validate    # Compose, Caddyfile и Alloy config
+make build       # собрать Caddy
+make tunnel      # Grafana :3000 и Prometheus :9090 через SSH
+make down        # остановить стек без удаления volumes
 ```
 
-Grafana и Prometheus на сервере открываются через ssh-туннель:
+## Конфигурация
 
-```sh
-SERVER_IP=213.171.31.1 make tunnel
-# затем http://localhost:3000 (admin / GRAFANA_ADMIN_PASSWORD)
-#       http://localhost:9090
+Шаблон находится в [`.env.example`](.env.example).
+
+- `FRONTEND_DOMAIN`, `PROD_DOMAIN` — production web и API;
+- `FRONTEND_STAGE_DOMAIN`, `STAGE_DOMAIN` — staging web и API;
+- `ACME_EMAIL` — выпуск TLS-сертификатов;
+- `RABBITMQ_*`, `JUDGE0_*`, `GRAFANA_ADMIN_PASSWORD` — секреты сервисов;
+- `WEB_*_UPSTREAM`, `API_*_UPSTREAM` — aliases приложений в `tramplin-edge`.
+
+Backend и frontend должны публиковать aliases, совпадающие с upstream-значениями.
+По умолчанию это:
+
+```text
+tramplin-prod-web       tramplin-prod-api
+tramplin-stage-web      tramplin-stage-api
+tramplin-rabbitmq       tramplin-judge0
 ```
 
-## Что где менять
+Grafana и Prometheus слушают только `127.0.0.1`; открывайте их через
+`make tunnel`. RabbitMQ management UI доступен аналогично на порту `15672`.
 
-| Что | Где |
-|---|---|
-| Домен сайта и домен API | `.env`: `FRONTEND_DOMAIN` и `PROD_DOMAIN` (в GitLab — `INFRA_ENV`) |
-| Почта для сертификатов, пароли Grafana/RabbitMQ/Judge0 | `.env` (в GitLab — `INFRA_ENV`) |
-| Лимит запросов по сайтам | `caddy/Caddyfile`, директива `events` нужного домена |
-| Апстримы API | `.env`: `API_PROD_UPSTREAM`, `API_STAGE_UPSTREAM` |
-| Лимит запросов, размер тела, заголовки | `caddy/Caddyfile` |
-| Срок хранения метрик | `docker-compose.yml`, флаги `prometheus` |
-| Срок хранения логов | `observability/loki/loki.yml`, `retention_period` |
-| Что собирается и куда шлётся | `observability/alloy/config.alloy` |
-| Дашборд | `observability/grafana/dashboards/` |
+## CI/CD
 
-## Чего здесь пока нет
+Pipeline проверяет Compose, формат Alloy, секреты и конфигурационные уязвимости,
+затем собирает, валидирует и сканирует immutable Caddy image.
 
-- Алертов. Prometheus поднят без `alertmanager`: правила писать не под кого,
-  пока нет дежурства.
-- Бэкапов Postgres. Это задача бэкенда, здесь только наблюдение.
-- Отдельного домена для Grafana. Пока хватает туннеля; если понадобится
-  снаружи — добавить блок в `Caddyfile` и обязательно `basic_auth`.
+Deploy копирует Compose, `judge0.conf`, Caddy и observability configs, создаёт
+`tramplin-edge`, обновляет весь стек и ждёт healthchecks. При ошибке job печатает
+состояние и последние логи.
+
+Нужные protected CI/CD variables:
+
+- `SERVER_IP`, `SSH_PRIVATE_KEY`;
+- `INFRA_ENV` типа File;
+- `PROD_DOMAIN` для GitLab environment URL.
+
+## Данные и безопасность
+
+Именованные volumes содержат RabbitMQ, Judge0 PostgreSQL, Caddy certificates,
+Prometheus, Loki и Grafana. `make down` их сохраняет; `docker compose down -v`
+удалит безвозвратно.
+
+Регулярно сохраняйте PostgreSQL Judge0, RabbitMQ и данные observability во внешнее
+хранилище. Не публикуйте management-порты наружу и не добавляйте приложения в
+закрытую сеть Judge0.

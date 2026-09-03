@@ -12,7 +12,7 @@
 	}
 }
 
-{$FRONTEND_DOMAIN:web.localhost} {
+(common) {
 	encode {
 		zstd
 		gzip
@@ -36,6 +36,10 @@
 	request_body {
 		max_size 10MB
 	}
+}
+
+{$FRONTEND_DOMAIN:web.localhost} {
+	import common
 
 	rate_limit {
 		zone web_prod {
@@ -51,27 +55,8 @@
 }
 
 {$PROD_DOMAIN:prod.localhost} {
-	encode {
-		zstd
-		gzip
-		match {
-			header Content-Type application/json*
-			header Content-Type application/javascript*
-			header Content-Type text/html*
-			header Content-Type text/css*
-			header Content-Type text/plain*
-		}
-	}
-	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		X-Content-Type-Options "nosniff"
-		X-Frame-Options "DENY"
-		Referrer-Policy "strict-origin-when-cross-origin"
-		-Server
-	}
-	request_body {
-		max_size 10MB
-	}
+	import common
+
 	rate_limit {
 		zone api_prod {
 			key {remote_host}
@@ -85,27 +70,8 @@
 }
 
 {$FRONTEND_STAGE_DOMAIN:web-stage.localhost} {
-	encode {
-		zstd
-		gzip
-		match {
-			header Content-Type application/json*
-			header Content-Type application/javascript*
-			header Content-Type text/html*
-			header Content-Type text/css*
-			header Content-Type text/plain*
-		}
-	}
-	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		X-Content-Type-Options "nosniff"
-		X-Frame-Options "DENY"
-		Referrer-Policy "strict-origin-when-cross-origin"
-		-Server
-	}
-	request_body {
-		max_size 10MB
-	}
+	import common
+
 	rate_limit {
 		zone web_stage {
 			key {remote_host}
@@ -119,27 +85,8 @@
 }
 
 {$STAGE_DOMAIN:stage.localhost} {
-	encode {
-		zstd
-		gzip
-		match {
-			header Content-Type application/json*
-			header Content-Type application/javascript*
-			header Content-Type text/html*
-			header Content-Type text/css*
-			header Content-Type text/plain*
-		}
-	}
-	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		X-Content-Type-Options "nosniff"
-		X-Frame-Options "DENY"
-		Referrer-Policy "strict-origin-when-cross-origin"
-		-Server
-	}
-	request_body {
-		max_size 10MB
-	}
+	import common
+
 	rate_limit {
 		zone api_stage {
 			key {remote_host}

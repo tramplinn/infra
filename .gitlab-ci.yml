@@ -1,5 +1,5 @@
 stages:
-  - lint
+  - test
   - build
   - deploy
 
@@ -14,12 +14,13 @@ default:
     - linux
 
 variables:
+  CADDY_IMAGE: "$CI_REGISTRY_IMAGE/caddy:$CI_COMMIT_SHORT_SHA"
   SSH_USER: "user1"
   SSH_PORT: "15945"
   DEPLOY_PATH: "/home/$SSH_USER/apps/infra"
 
 compose-config:
-  stage: lint
+  stage: test
   image: docker:29.7.2
   variables:
     ACME_EMAIL: ci@example.com
@@ -32,7 +33,7 @@ compose-config:
     - docker compose config --quiet
 
 alloy-fmt:
-  stage: lint
+  stage: test
   image:
     name: grafana/alloy:v1.19.2
     entrypoint: [""]
@@ -40,7 +41,7 @@ alloy-fmt:
     - alloy fmt observability/alloy/config.alloy > /dev/null
 
 gitleaks:
-  stage: lint
+  stage: test
   image:
     name: zricethezav/gitleaks:v8.30.1
     entrypoint: [""]
@@ -48,14 +49,14 @@ gitleaks:
     - gitleaks detect --source . --no-git --verbose --redact
 
 trivy-config:
-  stage: lint
+  stage: test
   image:
     name: aquasec/trivy:0.74.0
     entrypoint: [""]
   script:
     - trivy config --severity HIGH,CRITICAL --exit-code 1 .
 
-build-caddy:
+build:
   stage: build
   image: docker:29.7.2
   rules:
@@ -68,17 +69,15 @@ build-caddy:
   before_script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
   script:
-    - docker build --pull --provenance=false
-      -t "$CI_REGISTRY_IMAGE/caddy:$CI_COMMIT_SHORT_SHA" caddy
+    - docker build --pull --provenance=false -t "$CADDY_IMAGE" caddy
     - docker run --rm -v /var/run/docker.sock:/var/run/docker.sock
       aquasec/trivy:0.74.0 image --scanners vuln
-      --severity HIGH,CRITICAL --exit-code 1
-      "$CI_REGISTRY_IMAGE/caddy:$CI_COMMIT_SHORT_SHA"
+      --severity HIGH,CRITICAL --exit-code 1 "$CADDY_IMAGE"
     - docker run --rm -i -e ACME_EMAIL=ci@example.com
-      --entrypoint sh "$CI_REGISTRY_IMAGE/caddy:$CI_COMMIT_SHORT_SHA"
+      --entrypoint sh "$CADDY_IMAGE"
       -c 'cat > /tmp/Caddyfile && caddy validate --adapter caddyfile --config /tmp/Caddyfile'
       < caddy/Caddyfile
-    - docker push "$CI_REGISTRY_IMAGE/caddy:$CI_COMMIT_SHORT_SHA"
+    - docker push "$CADDY_IMAGE"
   after_script:
     - docker logout "$CI_REGISTRY"
 
@@ -92,19 +91,35 @@ deploy:
     - export SSH_AUTH_SOCK=/tmp/ssh-agent.sock
     - ssh-agent -a "$SSH_AUTH_SOCK" >/dev/null
     - echo "$SSH_PRIVATE_KEY" | base64 -d | ssh-add -
-    - mkdir -p ~/.ssh
-    - chmod 700 ~/.ssh
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
     - printf 'Host *\n  Port %s\n  StrictHostKeyChecking accept-new\n' "$SSH_PORT" > ~/.ssh/config
     - chmod 600 ~/.ssh/config
   script:
     - ssh "$SSH_USER@$SERVER_IP" "mkdir -p $DEPLOY_PATH"
-    - scp -r docker-compose.yml caddy observability scripts "$SSH_USER@$SERVER_IP:$DEPLOY_PATH/"
+    - scp -r docker-compose.yml judge0.conf caddy observability "$SSH_USER@$SERVER_IP:$DEPLOY_PATH/"
     - scp "$INFRA_ENV" "$SSH_USER@$SERVER_IP:$DEPLOY_PATH/.env"
     - ssh "$SSH_USER@$SERVER_IP" "chmod 600 $DEPLOY_PATH/.env"
     - printf '%s' "$CI_REGISTRY_PASSWORD" |
       ssh "$SSH_USER@$SERVER_IP" "docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY"
-    - ssh "$SSH_USER@$SERVER_IP"
-      "bash $DEPLOY_PATH/scripts/deploy.sh '$CI_REGISTRY_IMAGE/caddy:$CI_COMMIT_SHORT_SHA' '$CI_REGISTRY'"
+    - |
+      ssh "$SSH_USER@$SERVER_IP" \
+        "bash -s -- '$DEPLOY_PATH' '$CADDY_IMAGE' '$CI_REGISTRY'" <<'REMOTE'
+      set -euo pipefail
+
+      cd "$1"
+      export CADDY_IMAGE="$2"
+      registry=$3
+      compose=(docker compose --env-file .env)
+
+      trap '"${compose[@]}" ps; "${compose[@]}" logs --tail 100' ERR
+      trap 'docker logout "$registry" >/dev/null 2>&1 || true' EXIT
+
+      docker network inspect tramplin-edge >/dev/null 2>&1 || docker network create tramplin-edge
+      "${compose[@]}" config --quiet
+      "${compose[@]}" pull --quiet
+      "${compose[@]}" up -d --no-build --remove-orphans --wait --wait-timeout 180
+      docker image prune -f
+      REMOTE
   environment:
     name: edge
     url: "https://$PROD_DOMAIN"
