@@ -3,6 +3,10 @@
 
 	admin :2019
 	metrics
+	servers {
+		trusted_proxies static 172.18.0.1/32
+		trusted_proxies_strict
+	}
 
 	order rate_limit before basicauth
 
@@ -43,7 +47,7 @@
 
 	rate_limit {
 		zone web_prod {
-			key {remote_host}
+			key {client_ip}
 			events 600
 			window 1m
 		}
@@ -59,7 +63,7 @@
 
 	rate_limit {
 		zone api_prod {
-			key {remote_host}
+			key {client_ip}
 			events 120
 			window 1m
 		}
@@ -74,7 +78,7 @@
 
 	rate_limit {
 		zone web_stage {
-			key {remote_host}
+			key {client_ip}
 			events 600
 			window 1m
 		}
@@ -89,7 +93,7 @@
 
 	rate_limit {
 		zone api_stage {
-			key {remote_host}
+			key {client_ip}
 			events 120
 			window 1m
 		}
