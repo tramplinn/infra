@@ -116,9 +116,13 @@ deploy:
 
       docker network inspect tramplin-edge >/dev/null 2>&1 || docker network create tramplin-edge
       "${compose[@]}" config --quiet
-      "${compose[@]}" pull --quiet
+      # The runner and production services share a small Docker host. Remove
+      # unused release and CI images before pulling large images such as Judge0.
+      docker image prune -af
+      df -h /
+      "${compose[@]}" pull
       "${compose[@]}" up -d --no-build --remove-orphans --wait --wait-timeout 180
-      docker image prune -f
+      docker image prune -af
       REMOTE
   environment:
     name: edge
