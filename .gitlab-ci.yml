@@ -80,6 +80,7 @@ build:
     - docker push "$CADDY_IMAGE"
   after_script:
     - docker logout "$CI_REGISTRY"
+    - docker builder prune -af
 
 deploy:
   stage: deploy
