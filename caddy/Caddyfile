@@ -69,6 +69,21 @@
 	}
 }
 
+{$MCP_DOMAIN:mcp.localhost} {
+	import common
+
+	rate_limit {
+		zone mcp_prod {
+			key {remote_host}
+			events 120
+			window 1m
+		}
+	}
+	reverse_proxy {$MCP_PROD_UPSTREAM:tramplin-mcp-prod-mcp:8001} {
+		flush_interval -1
+	}
+}
+
 {$FRONTEND_STAGE_DOMAIN:web-stage.localhost} {
 	import common
 
@@ -95,6 +110,20 @@
 		}
 	}
 	reverse_proxy {$API_STAGE_UPSTREAM:tramplin-stage-api:8000} {
+		flush_interval -1
+	}
+}
+
+{$MCP_STAGE_DOMAIN:mcp-stage.localhost} {
+	import common
+
+	rate_limit {
+		zone mcp_stage {
+			key {remote_host}
+			events 120
+			window 1m
+		}
+	reverse_proxy {$MCP_STAGE_UPSTREAM:tramplin-mcp-stage-mcp:8001} {
 		flush_interval -1
 	}
 }

@@ -15,6 +15,7 @@
 ```text
 internet → Caddy → frontend
                  → backend API → RabbitMQ → algorithm worker → Judge0
+                 → MCP → backend authoring API
 
 Alloy → Prometheus / Loki → Grafana
 ```
@@ -53,9 +54,10 @@ make down        # остановить стек без удаления volumes
 
 - `FRONTEND_DOMAIN`, `PROD_DOMAIN` — production web и API;
 - `FRONTEND_STAGE_DOMAIN`, `STAGE_DOMAIN` — staging web и API;
+- `MCP_DOMAIN`, `MCP_STAGE_DOMAIN` — production и staging MCP;
 - `ACME_EMAIL` — выпуск TLS-сертификатов;
 - `RABBITMQ_*`, `JUDGE0_*`, `GRAFANA_ADMIN_PASSWORD` — секреты сервисов;
-- `WEB_*_UPSTREAM`, `API_*_UPSTREAM` — aliases приложений в `tramplin-edge`.
+- `WEB_*_UPSTREAM`, `API_*_UPSTREAM`, `MCP_*_UPSTREAM` — aliases приложений в `tramplin-edge`.
 
 Backend и frontend должны публиковать aliases, совпадающие с upstream-значениями.
 По умолчанию это:
@@ -63,6 +65,7 @@ Backend и frontend должны публиковать aliases, совпада�
 ```text
 tramplin-prod-web       tramplin-prod-api
 tramplin-stage-web      tramplin-stage-api
+tramplin-mcp-prod-mcp   tramplin-mcp-stage-mcp
 tramplin-rabbitmq       tramplin-judge0
 ```
 

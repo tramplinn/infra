@@ -147,10 +147,14 @@ services:
       PROD_DOMAIN: ${PROD_DOMAIN:-prod.localhost}
       FRONTEND_STAGE_DOMAIN: ${FRONTEND_STAGE_DOMAIN:-web-stage.localhost}
       STAGE_DOMAIN: ${STAGE_DOMAIN:-stage.localhost}
+      MCP_DOMAIN: ${MCP_DOMAIN:-mcp.localhost}
+      MCP_STAGE_DOMAIN: ${MCP_STAGE_DOMAIN:-mcp-stage.localhost}
       WEB_PROD_UPSTREAM: ${WEB_PROD_UPSTREAM:-tramplin-prod-web:80}
       API_PROD_UPSTREAM: ${API_PROD_UPSTREAM:-tramplin-prod-api:8000}
       WEB_STAGE_UPSTREAM: ${WEB_STAGE_UPSTREAM:-tramplin-stage-web:80}
       API_STAGE_UPSTREAM: ${API_STAGE_UPSTREAM:-tramplin-stage-api:8000}
+      MCP_PROD_UPSTREAM: ${MCP_PROD_UPSTREAM:-tramplin-mcp-prod-mcp:8001}
+      MCP_STAGE_UPSTREAM: ${MCP_STAGE_UPSTREAM:-tramplin-mcp-stage-mcp:8001}
     ports:
       - "80:80"
       - "443:443"
