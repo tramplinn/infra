@@ -15,6 +15,7 @@ default:
 
 variables:
   CADDY_IMAGE: "$CI_REGISTRY_IMAGE/caddy:$CI_COMMIT_SHORT_SHA"
+  JUDGE0_WORKER_IMAGE: "$CI_REGISTRY_IMAGE/judge0-worker:$CI_COMMIT_SHORT_SHA"
   DEPLOY_PATH: "/opt/tramplin/production/infra"
 
 compose-config:
@@ -76,6 +77,11 @@ build:
       -c 'cat > /tmp/Caddyfile && caddy validate --adapter caddyfile --config /tmp/Caddyfile'
       < caddy/Caddyfile
     - docker push "$CADDY_IMAGE"
+    # Только пересобранный isolate поверх апстрим-образа (см. judge0/Dockerfile) —
+    # без trivy: базовый слой на Debian buster (EOL) целиком не наш, гейт по
+    # HIGH/CRITICAL был бы красным по CVE, которые мы не можем закрыть отсюда.
+    - docker build --provenance=false -t "$JUDGE0_WORKER_IMAGE" judge0
+    - docker push "$JUDGE0_WORKER_IMAGE"
   after_script:
     - docker logout "$CI_REGISTRY"
     - docker builder prune -af
@@ -102,12 +108,13 @@ deploy:
       ssh "$SSH_USER@$SERVER_IP" "docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY"
     - |
       ssh "$SSH_USER@$SERVER_IP" \
-        "bash -s -- '$DEPLOY_PATH' '$CADDY_IMAGE' '$CI_REGISTRY'" <<'REMOTE'
+        "bash -s -- '$DEPLOY_PATH' '$CADDY_IMAGE' '$JUDGE0_WORKER_IMAGE' '$CI_REGISTRY'" <<'REMOTE'
       set -euo pipefail
 
       cd "$1"
       export CADDY_IMAGE="$2"
-      registry=$3
+      export JUDGE0_WORKER_IMAGE="$3"
+      registry=$4
       compose=(docker compose --env-file .env)
 
       trap '"${compose[@]}" ps; "${compose[@]}" logs --tail 100' ERR

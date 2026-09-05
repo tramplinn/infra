@@ -62,7 +62,11 @@ services:
     mem_limit: 512m
 
   judge0-worker:
-    image: judge0/judge0:1.13.1
+    # Хост на cgroup v2, а апстрим-образ несёт isolate 1.8.1 (только cgroup v1) —
+    # без пересборки isolate 2.0 (см. Dockerfile) песочница вообще не создаётся.
+    image: ${JUDGE0_WORKER_IMAGE:-tramplin-judge0-worker:local}
+    build:
+      context: ./judge0
     command: ["./scripts/workers"]
     privileged: true
     security_opt: []
