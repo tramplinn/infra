@@ -15,9 +15,7 @@ default:
 
 variables:
   CADDY_IMAGE: "$CI_REGISTRY_IMAGE/caddy:$CI_COMMIT_SHORT_SHA"
-  SSH_USER: "user1"
-  SSH_PORT: "15945"
-  DEPLOY_PATH: "/home/$SSH_USER/apps/infra"
+  DEPLOY_PATH: "/opt/tramplin/infra"
 
 compose-config:
   stage: test
