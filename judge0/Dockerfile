@@ -11,11 +11,14 @@ USER root
 # лишний раз не трогаем.
 RUN git clone --depth 1 --branch v2.0 https://github.com/ioi/isolate.git /tmp/isolate \
     && make -C /tmp/isolate isolate \
-    && install -o root -g root -m 4755 /tmp/isolate/isolate /usr/local/bin/isolate \
+    && install -o root -g root -m 4755 /tmp/isolate/isolate /usr/local/bin/isolate-real \
     && rm -rf /tmp/isolate
 
+# judge0's Ruby side still passes --cg-timing/--no-cg-timing, which 2.0 removed —
+# shim in place of the real binary strips it before exec'ing isolate-real.
+COPY isolate-shim.sh /usr/local/bin/isolate
 COPY isolate-entrypoint.sh /usr/local/bin/isolate-entrypoint.sh
-RUN chmod +x /usr/local/bin/isolate-entrypoint.sh
+RUN chmod +x /usr/local/bin/isolate /usr/local/bin/isolate-entrypoint.sh
 
 USER judge0
 
