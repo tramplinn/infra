@@ -4,7 +4,7 @@
 
 ## Сервисы
 
-- Caddy — TLS, reverse proxy, security headers и rate limits;
+- Caddy — TLS, reverse proxy, security headers;
 - RabbitMQ — очередь алгоритмических заданий;
 - Judge0 — изолированное выполнение кода;
 - Prometheus, Loki, Grafana и Alloy — метрики, логи и dashboards;

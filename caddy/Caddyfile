@@ -4,8 +4,6 @@
 	admin :2019
 	metrics
 
-	order rate_limit before basicauth
-
 	log {
 		output stdout
 		format json
@@ -41,14 +39,6 @@
 {$FRONTEND_DOMAIN:web.localhost} {
 	import common
 
-	rate_limit {
-		zone web_prod {
-			key {remote_host}
-			events 600
-			window 1m
-		}
-	}
-
 	reverse_proxy {$WEB_PROD_UPSTREAM:tramplin-prod-web:80} {
 		flush_interval -1
 	}
@@ -57,13 +47,6 @@
 {$PROD_DOMAIN:prod.localhost} {
 	import common
 
-	rate_limit {
-		zone api_prod {
-			key {remote_host}
-			events 120
-			window 1m
-		}
-	}
 	reverse_proxy {$API_PROD_UPSTREAM:tramplin-prod-api:8000} {
 		flush_interval -1
 	}
@@ -72,13 +55,6 @@
 {$MCP_DOMAIN:mcp.localhost} {
 	import common
 
-	rate_limit {
-		zone mcp_prod {
-			key {remote_host}
-			events 120
-			window 1m
-		}
-	}
 	reverse_proxy {$MCP_PROD_UPSTREAM:tramplin-mcp-prod-mcp:8001} {
 		flush_interval -1
 	}
@@ -87,13 +63,6 @@
 {$FRONTEND_STAGE_DOMAIN:web-stage.localhost} {
 	import common
 
-	rate_limit {
-		zone web_stage {
-			key {remote_host}
-			events 600
-			window 1m
-		}
-	}
 	reverse_proxy {$WEB_STAGE_UPSTREAM:tramplin-stage-web:80} {
 		flush_interval -1
 	}
@@ -102,13 +71,6 @@
 {$STAGE_DOMAIN:stage.localhost} {
 	import common
 
-	rate_limit {
-		zone api_stage {
-			key {remote_host}
-			events 120
-			window 1m
-		}
-	}
 	reverse_proxy {$API_STAGE_UPSTREAM:tramplin-stage-api:8000} {
 		flush_interval -1
 	}
@@ -117,12 +79,6 @@
 {$MCP_STAGE_DOMAIN:mcp-stage.localhost} {
 	import common
 
-	rate_limit {
-		zone mcp_stage {
-			key {remote_host}
-			events 120
-			window 1m
-		}
 	reverse_proxy {$MCP_STAGE_UPSTREAM:tramplin-mcp-stage-mcp:8001} {
 		flush_interval -1
 	}

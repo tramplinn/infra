@@ -1,7 +1,6 @@
 FROM caddy:2.11.4-builder-alpine AS builder
 
 RUN xcaddy build \
-    --with github.com/mholt/caddy-ratelimit@v0.1.0 \
     --replace golang.org/x/crypto=golang.org/x/crypto@v0.56.0 \
     --replace golang.org/x/net=golang.org/x/net@v0.58.0 \
     --replace golang.org/x/text=golang.org/x/text@v0.41.0 \
