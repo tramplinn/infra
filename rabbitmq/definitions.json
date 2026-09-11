@@ -1,4 +1,5 @@
 {
+  "vhosts": [{ "name": "/" }],
   "queues": [
     { "name": "tramplin-local-algorithm-jobs", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum" } },
     { "name": "tramplin-local-embedding-jobs", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum" } },
