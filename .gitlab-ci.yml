@@ -115,11 +115,27 @@ deploy:
       export CADDY_IMAGE="$2"
       export JUDGE0_WORKER_IMAGE="$3"
       registry=$4
-      export RABBITMQ_CONFIG_HASH="$(sha256sum rabbitmq/rabbitmq.conf rabbitmq/definitions.json | sha256sum | cut -d' ' -f1)"
       compose=(docker compose --env-file .env)
 
       trap '"${compose[@]}" ps; "${compose[@]}" logs --tail 100' ERR
       trap 'docker logout "$registry" >/dev/null 2>&1 || true' EXIT
+
+      # RabbitMQ's definitions import is the documented way to declare users
+      # (https://www.rabbitmq.com/docs/definitions) and, unlike
+      # RABBITMQ_DEFAULT_USER/PASS, isn't limited to a first-ever boot on an
+      # empty database — it only adds what's missing, never overwrites. The
+      # hash is deterministic (salted with sha256 of the password itself) so
+      # re-running this without a password rotation produces the same file
+      # and doesn't cause a spurious rabbitmq restart below.
+      set -a; source .env; set +a
+      rmq_user="${RABBITMQ_USER:-tramplin}"
+      pass_hash="$(python3 -c "import hashlib, base64, os, sys; password = os.environ['RABBITMQ_PASSWORD'].encode(); salt = hashlib.sha256(password).digest()[:4]; digest = hashlib.sha256(salt + password).digest(); sys.stdout.write(base64.b64encode(salt + digest).decode())")"
+      jq --arg user "$rmq_user" --arg hash "$pass_hash" '
+        .users = [{name: $user, password_hash: $hash, hashing_algorithm: "rabbit_password_hashing_sha256", tags: ["administrator"]}] |
+        .permissions = [{user: $user, vhost: "/", configure: ".*", write: ".*", read: ".*"}]
+      ' rabbitmq/definitions.json > rabbitmq/definitions.json.tmp
+      mv rabbitmq/definitions.json.tmp rabbitmq/definitions.json
+      export RABBITMQ_CONFIG_HASH="$(sha256sum rabbitmq/rabbitmq.conf rabbitmq/definitions.json | sha256sum | cut -d' ' -f1)"
 
       docker network inspect tramplin-edge >/dev/null 2>&1 || docker network create tramplin-edge
       "${compose[@]}" config --quiet
@@ -129,19 +145,6 @@ deploy:
       df -h /
       "${compose[@]}" pull
       "${compose[@]}" up -d --no-build --remove-orphans --wait --wait-timeout 180
-
-      # RABBITMQ_DEFAULT_USER/PASS only bootstrap a user on a fully empty
-      # database, which ours isn't (vhost/queues already imported from
-      # definitions.json) — so create/update the app user explicitly and
-      # idempotently on every deploy instead of relying on that mechanism.
-      set -a; source .env; set +a
-      rmq_user="${RABBITMQ_USER:-tramplin}"
-      rmq=(docker exec tramplin-infra-rabbitmq-1 rabbitmqctl)
-      "${rmq[@]}" add_user "$rmq_user" "$RABBITMQ_PASSWORD" 2>/dev/null \
-        || "${rmq[@]}" change_password "$rmq_user" "$RABBITMQ_PASSWORD"
-      "${rmq[@]}" set_user_tags "$rmq_user" administrator
-      "${rmq[@]}" set_permissions -p / "$rmq_user" '.*' '.*' '.*'
-
       docker image prune -af
       REMOTE
   environment:
