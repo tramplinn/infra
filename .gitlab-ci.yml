@@ -129,6 +129,19 @@ deploy:
       df -h /
       "${compose[@]}" pull
       "${compose[@]}" up -d --no-build --remove-orphans --wait --wait-timeout 180
+
+      # RABBITMQ_DEFAULT_USER/PASS only bootstrap a user on a fully empty
+      # database, which ours isn't (vhost/queues already imported from
+      # definitions.json) — so create/update the app user explicitly and
+      # idempotently on every deploy instead of relying on that mechanism.
+      set -a; source .env; set +a
+      rmq_user="${RABBITMQ_USER:-tramplin}"
+      rmq=(docker exec tramplin-infra-rabbitmq-1 rabbitmqctl)
+      "${rmq[@]}" add_user "$rmq_user" "$RABBITMQ_PASSWORD" 2>/dev/null \
+        || "${rmq[@]}" change_password "$rmq_user" "$RABBITMQ_PASSWORD"
+      "${rmq[@]}" set_user_tags "$rmq_user" administrator
+      "${rmq[@]}" set_permissions -p / "$rmq_user" '.*' '.*' '.*'
+
       docker image prune -af
       REMOTE
   environment:
