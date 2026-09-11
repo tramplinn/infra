@@ -101,7 +101,7 @@ deploy:
     - chmod 600 ~/.ssh/config
   script:
     - ssh "$SSH_USER@$SERVER_IP" "mkdir -p $DEPLOY_PATH"
-    - scp -r docker-compose.yml judge0.conf caddy observability "$SSH_USER@$SERVER_IP:$DEPLOY_PATH/"
+    - scp -r docker-compose.yml judge0.conf caddy observability rabbitmq "$SSH_USER@$SERVER_IP:$DEPLOY_PATH/"
     - scp "$INFRA_ENV" "$SSH_USER@$SERVER_IP:$DEPLOY_PATH/.env"
     - ssh "$SSH_USER@$SERVER_IP" "chmod 600 $DEPLOY_PATH/.env"
     - printf '%s' "$CI_REGISTRY_PASSWORD" |
