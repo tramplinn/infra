@@ -3,8 +3,7 @@ set -euo pipefail
 
 deploy_path=$1
 export CADDY_IMAGE=$2
-export JUDGE0_WORKER_IMAGE=$3
-registry=$4
+registry=$3
 
 cd "$deploy_path"
 compose=(docker compose --env-file .env)
@@ -32,4 +31,6 @@ docker image prune -af
 df -h /
 "${compose[@]}" pull
 "${compose[@]}" up -d --no-build --remove-orphans --wait --wait-timeout 180
+# Одноразовая установка пакетов Piston: profiles: ["init"] держит её вне `up`/`--wait`.
+"${compose[@]}" run --rm piston-init
 docker image prune -af

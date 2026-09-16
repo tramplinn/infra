@@ -6,7 +6,7 @@
 
 - Caddy — TLS, reverse proxy, security headers;
 - RabbitMQ — очереди алгоритмических заданий, эмбеддингов и почты;
-- Judge0 — изолированное выполнение кода;
+- Piston — изолированное выполнение кода;
 - Prometheus, Loki, Grafana и Alloy — метрики, логи и dashboards;
 - Docker socket proxy — read-only доступ Alloy к Docker API.
 
@@ -22,14 +22,15 @@
 
 ```text
 internet → Caddy → frontend
-                 → backend API → RabbitMQ → algorithm worker → Judge0
+                 → backend API → RabbitMQ → algorithm worker → Piston
                  → MCP → backend authoring API
 
 Alloy → Prometheus / Loki → Grafana
 ```
 
-Judge0 использует отдельную внутреннюю сеть и не видит базы или хранилища
-приложения. Его server и worker требуют Docker `privileged`.
+Piston не видит базы или хранилища приложения — единственный вход в него
+это HTTP API на `tramplin-piston:2000`. Ему нужен Docker `privileged` для
+изоляции запускаемого кода.
 
 ## Запуск
 
@@ -42,7 +43,16 @@ make up
 ```
 
 `make up` создаёт общую сеть при первом запуске и поднимает полный стек, включая
-Judge0. Домены должны указывать на сервер до получения TLS-сертификатов.
+Piston. Домены должны указывать на сервер до получения TLS-сертификатов.
+
+Piston стартует без единого установленного языка — пакеты ставятся отдельным
+одноразовым шагом (профиль compose `init`, не участвует в `make up`/`--wait`):
+
+```bash
+docker compose run --rm piston-init
+```
+
+`deploy-remote.sh` делает это автоматически при каждом деплое.
 
 Полезные команды:
 
@@ -64,7 +74,7 @@ make down        # остановить стек без удаления volumes
 - `FRONTEND_STAGE_DOMAIN`, `STAGE_DOMAIN` — staging web и API;
 - `MCP_DOMAIN`, `MCP_STAGE_DOMAIN` — production и staging MCP;
 - `ACME_EMAIL` — выпуск TLS-сертификатов;
-- `RABBITMQ_*`, `JUDGE0_*`, `GRAFANA_ADMIN_PASSWORD` — секреты сервисов;
+- `RABBITMQ_*`, `GRAFANA_ADMIN_PASSWORD` — секреты сервисов;
 - `WEB_*_UPSTREAM`, `API_*_UPSTREAM`, `MCP_*_UPSTREAM` — aliases приложений в `tramplin-edge`.
 
 Backend и frontend должны публиковать aliases, совпадающие с upstream-значениями.
@@ -74,7 +84,7 @@ Backend и frontend должны публиковать aliases, совпада�
 tramplin-prod-web       tramplin-prod-api
 tramplin-stage-web      tramplin-stage-api
 tramplin-mcp-prod-mcp   tramplin-mcp-stage-mcp
-tramplin-rabbitmq       tramplin-judge0
+tramplin-rabbitmq       tramplin-piston
 ```
 
 Grafana и Prometheus слушают только `127.0.0.1`; открывайте их через
@@ -85,9 +95,9 @@ Grafana и Prometheus слушают только `127.0.0.1`; открывай�
 Pipeline проверяет Compose, формат Alloy, секреты и конфигурационные уязвимости,
 затем собирает, валидирует и сканирует immutable Caddy image.
 
-Deploy копирует Compose, `judge0.conf`, Caddy и observability configs, создаёт
-`tramplin-edge`, обновляет весь стек и ждёт healthchecks. При ошибке job печатает
-состояние и последние логи.
+Deploy копирует Compose, Caddy и observability configs, создаёт `tramplin-edge`,
+обновляет весь стек, ждёт healthchecks и переустанавливает пакеты Piston. При
+ошибке job печатает состояние и последние логи.
 
 Нужные protected CI/CD variables:
 
@@ -97,10 +107,11 @@ Deploy копирует Compose, `judge0.conf`, Caddy и observability configs, 
 
 ## Данные и безопасность
 
-Именованные volumes содержат RabbitMQ, Judge0 PostgreSQL, Caddy certificates,
-Prometheus, Loki и Grafana. `make down` их сохраняет; `docker compose down -v`
-удалит безвозвратно.
+Именованные volumes содержат RabbitMQ, установленные пакеты Piston, Caddy
+certificates, Prometheus, Loki и Grafana. `make down` их сохраняет;
+`docker compose down -v` удалит безвозвратно.
 
-Регулярно сохраняйте PostgreSQL Judge0, RabbitMQ и данные observability во внешнее
-хранилище. Не публикуйте management-порты наружу и не добавляйте приложения в
-закрытую сеть Judge0.
+Регулярно сохраняйте RabbitMQ и данные observability во внешнее хранилище. Не
+публикуйте management-порты наружу. У Piston нет встроенной аутентификации —
+единственная защита это то, что порт 2000 доступен только внутри сети
+`tramplin-edge`, а не наружу.

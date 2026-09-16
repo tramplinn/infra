@@ -15,7 +15,6 @@ default:
 
 variables:
   CADDY_IMAGE: "$CI_REGISTRY_IMAGE/caddy:$CI_COMMIT_SHORT_SHA"
-  JUDGE0_WORKER_IMAGE: "$CI_REGISTRY_IMAGE/judge0-worker:$CI_COMMIT_SHORT_SHA"
   DEPLOY_PATH: "/opt/tramplin/production/infra"
 
 compose-config:
@@ -25,9 +24,6 @@ compose-config:
     ACME_EMAIL: ci@example.com
     GRAFANA_ADMIN_PASSWORD: ci-only-placeholder
     RABBITMQ_PASSWORD: ci-only-placeholder
-    JUDGE0_POSTGRES_PASSWORD: ci-only-placeholder
-    JUDGE0_REDIS_PASSWORD: ci-only-placeholder
-    JUDGE0_AUTH_TOKEN: ci-only-placeholder
   script:
     - docker compose config --quiet
 
@@ -77,8 +73,6 @@ build:
       -c 'cat > /tmp/Caddyfile && caddy validate --adapter caddyfile --config /tmp/Caddyfile'
       < caddy/Caddyfile
     - docker push "$CADDY_IMAGE"
-    - docker build --provenance=false -t "$JUDGE0_WORKER_IMAGE" judge0
-    - docker push "$JUDGE0_WORKER_IMAGE"
   after_script:
     - docker logout "$CI_REGISTRY"
     - docker builder prune -af
@@ -98,13 +92,13 @@ deploy:
     - chmod 600 ~/.ssh/config
   script:
     - ssh "$SSH_USER@$SERVER_IP" "mkdir -p $DEPLOY_PATH"
-    - scp -r docker-compose.yml judge0.conf caddy observability rabbitmq scripts "$SSH_USER@$SERVER_IP:$DEPLOY_PATH/"
+    - scp -r docker-compose.yml caddy observability rabbitmq scripts "$SSH_USER@$SERVER_IP:$DEPLOY_PATH/"
     - scp "$INFRA_ENV" "$SSH_USER@$SERVER_IP:$DEPLOY_PATH/.env"
     - ssh "$SSH_USER@$SERVER_IP" "chmod 600 $DEPLOY_PATH/.env"
     - printf '%s' "$CI_REGISTRY_PASSWORD" |
       ssh "$SSH_USER@$SERVER_IP" "docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY"
     - ssh "$SSH_USER@$SERVER_IP"
-      "bash '$DEPLOY_PATH/scripts/deploy-remote.sh' '$DEPLOY_PATH' '$CADDY_IMAGE' '$JUDGE0_WORKER_IMAGE' '$CI_REGISTRY'"
+      "bash '$DEPLOY_PATH/scripts/deploy-remote.sh' '$DEPLOY_PATH' '$CADDY_IMAGE' '$CI_REGISTRY'"
   environment:
     name: edge
     url: "https://$PROD_DOMAIN"
