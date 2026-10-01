@@ -1,2 +1,5 @@
 .env
 *.local.yml
+.DS_Store
+.idea/
+.vscode/

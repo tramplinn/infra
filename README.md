@@ -101,7 +101,7 @@ Deploy копирует Compose, Caddy и observability configs, создаёт 
 
 Нужные protected CI/CD variables:
 
-- `SERVER_IP`, `SSH_PRIVATE_KEY`;
+- `SERVER_IP`, `SSH_PORT`, `SSH_USER`, `SSH_PRIVATE_KEY`;
 - `INFRA_ENV` типа File;
 - `PROD_DOMAIN` для GitLab environment URL.
 
