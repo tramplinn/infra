@@ -33,6 +33,7 @@ spec:
       terminationGracePeriodSeconds: 120
       securityContext:
         fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
         seccompProfile:
           type: RuntimeDefault
       initContainers:
@@ -109,6 +110,14 @@ spec:
       containers:
       - name: rabbitmq
         image: rabbitmq:4.3.5-alpine
+        command: [sh, -ec]
+        args:
+        - |
+          # fsGroup may add group permissions when mounting an existing volume.
+          if [ -f /var/lib/rabbitmq/.erlang.cookie ]; then
+            chmod 600 /var/lib/rabbitmq/.erlang.cookie
+          fi
+          exec docker-entrypoint.sh rabbitmq-server
         ports:
         - name: amqp
           containerPort: 5672
