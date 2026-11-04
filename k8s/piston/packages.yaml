@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: piston-packages
+data:
+  packages.json: |
+    {
+      "python": "3.12.0",
+      "node": "20.11.1",
+      "typescript": "5.0.3",
+      "gcc": "10.2.0",
+      "mono": "6.12.0",
+      "go": "1.16.2",
+      "kotlin": "1.8.20",
+      "java": "15.0.2"
+    }

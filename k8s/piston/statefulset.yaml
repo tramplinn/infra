@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: piston
+spec:
+  serviceName: piston-headless
+  replicas: 1
+  revisionHistoryLimit: 3
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  selector:
+    matchLabels:
+      app: piston
+  template:
+    metadata:
+      labels:
+        app: piston
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubernetes.io/arch: amd64
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
+      containers:
+      - name: piston
+        image: ghcr.io/engineer-man/piston@sha256:2f66b7456189c4d713aa986d98eccd0b6ee16d26c7ec5f21b30e942756fd127a
+        command:
+        - bash
+        - -ec
+        - |
+          set -eu
+          # Never manipulate a host cgroup tree: the runtime must provide a private cgroup namespace.
+          test "$(stat -fc %T /sys/fs/cgroup)" = cgroup2fs
+          grep -qx '0::/' /proc/self/cgroup
+          test -w /sys/fs/cgroup/cgroup.subtree_control
+          exec /piston_api/src/docker-entrypoint.sh
+        securityContext:
+          privileged: true
+          runAsUser: 0
+        envFrom:
+        - configMapRef:
+            name: piston
+        ports:
+        - name: http
+          containerPort: 2000
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: '2'
+            memory: 4Gi
+        volumeMounts:
+        - name: packages
+          mountPath: /piston/packages
+        - name: tmp
+          mountPath: /tmp
+        startupProbe:
+          httpGet:
+            path: /api/v2/runtimes
+            port: http
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 120
+        readinessProbe:
+          httpGet:
+            path: /api/v2/runtimes
+            port: http
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /api/v2/runtimes
+            port: http
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+      volumes:
+      - name: tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi
+  volumeClaimTemplates:
+  - metadata:
+      name: packages
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: local-path
+      resources:
+        requests:
+          storage: 15Gi

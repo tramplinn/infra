@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tramplin-infra
+data:
+  POSTGRES_DB: tramplin
+  POSTGRES_APP_USER: tramplin_app
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: '5432'
+  REDIS_HOST: redis
+  REDIS_PORT: '6379'
+  RABBITMQ_HOST: rabbitmq
+  RABBITMQ_PORT: '5672'
+  RABBITMQ_USER: tramplin
+  ALGORITHM_QUEUE_NAME: algorithm-jobs
+  EMBEDDING_QUEUE_NAME: embedding-jobs
+  EMAIL_TRANSACTIONAL_QUEUE_NAME: email-transactional
+  EMAIL_BULK_QUEUE_NAME: email-bulk
+  RABBITMQ_EMAIL_USER: tramplin_email
+  POSTGRES_MCP_DB: tramplin_mcp
+  POSTGRES_MCP_USER: tramplin_mcp

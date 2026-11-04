@@ -1,104 +1,60 @@
-stages:
-  - test
-  - build
-  - deploy
-
+stages: [validate, deploy]
 workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: "$CI_COMMIT_BRANCH"
-
-default:
-  tags:
-    - docker
-    - linux
-
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
 variables:
-  CADDY_IMAGE: "$CI_REGISTRY_IMAGE/caddy:$CI_COMMIT_SHORT_SHA"
-  DEPLOY_PATH: "/opt/tramplin/production/infra"
-
-compose-config:
-  stage: test
-  image: docker:29.7.2
-  variables:
-    ACME_EMAIL: ci@example.com
-    GRAFANA_ADMIN_PASSWORD: ci-only-placeholder
-    RABBITMQ_PASSWORD: ci-only-placeholder
-  script:
-    - docker compose config --quiet
-
-alloy-fmt:
-  stage: test
+  KUBE_CONTEXT: tramplin1/infra:tramplin
+default:
   image:
-    name: grafana/alloy:v1.19.2
+    name: alpine/kubectl:1.37.1
     entrypoint: [""]
+  tags: [saas-linux-small-amd64]
+  timeout: 90m
+validate:
+  stage: validate
   script:
-    - alloy fmt observability/alloy/config.alloy > /dev/null
+    - kubectl kustomize k8s/ > /dev/null
+deploy-production:
+  stage: deploy
+  resource_group: tramplin-production
+  environment:
+    name: production
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_REF_PROTECTED == "true"'
+      when: manual
+  allow_failure: false
+  script:
+    - kubectl config use-context "$KUBE_CONTEXT"
+    - sed -i "s/REPLACE_PROJECT_ID/$CI_PROJECT_ID/g" k8s/secrets/store.yaml
+    - kubectl apply --dry-run=server -k k8s/ >/dev/null
+    - kubectl apply --dry-run=server -f k8s/piston/install-job.yaml >/dev/null
+    - kubectl -n tramplin apply -f k8s/secrets/store.yaml
+    - kubectl -n tramplin wait --for=condition=Ready secretstore/gitlab-tramplin-infra --timeout=120s
+    - kubectl -n tramplin apply -f k8s/secrets/external-secrets.yaml
+    - kubectl -n tramplin wait --for=condition=Ready externalsecret/postgres-admin externalsecret/postgres-app externalsecret/postgres-mcp externalsecret/redis externalsecret/rabbitmq externalsecret/rabbitmq-email externalsecret/gitlab-registry --timeout=180s
+    - kubectl apply -k k8s/
+    # Import updated RabbitMQ topology on boot, including config-only releases.
+    - kubectl -n tramplin rollout restart statefulset/rabbitmq
+    - kubectl -n tramplin rollout restart statefulset/piston
+    - |
+      for service in postgres redis rabbitmq piston; do
+        kubectl -n tramplin rollout status "statefulset/$service" --timeout=600s
+      done
+    - kubectl -n tramplin delete job piston-install --ignore-not-found --wait=true --timeout=60s
+    - kubectl create -f k8s/piston/install-job.yaml
+    - |
+      if ! kubectl -n tramplin wait --for=condition=Complete job/piston-install --timeout=3660s; then
+        kubectl -n tramplin logs job/piston-install --tail=100 || true
+        exit 1
+      fi
+    - kubectl -n tramplin logs job/piston-install --tail=30
+    - kubectl -n tramplin get pods,pvc,svc
 
 gitleaks:
-  stage: test
+  stage: validate
   image:
     name: zricethezav/gitleaks:v8.30.1
     entrypoint: [""]
   script:
     - gitleaks detect --source . --no-git --verbose --redact
-
-trivy-config:
-  stage: test
-  image:
-    name: aquasec/trivy:0.74.0
-    entrypoint: [""]
-  script:
-    - trivy config --severity HIGH,CRITICAL --exit-code 1 .
-
-build:
-  stage: build
-  image: docker:29.7.2
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-  retry:
-    max: 2
-    when:
-      - script_failure
-      - runner_system_failure
-  before_script:
-    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
-  script:
-    - docker build --pull --provenance=false -t "$CADDY_IMAGE" caddy
-    - docker run --rm -v /var/run/docker.sock:/var/run/docker.sock
-      aquasec/trivy:0.74.0 image --scanners vuln
-      --severity HIGH,CRITICAL --exit-code 1 "$CADDY_IMAGE"
-    - docker run --rm -i -e ACME_EMAIL=ci@example.com
-      --entrypoint sh "$CADDY_IMAGE"
-      -c 'cat > /tmp/Caddyfile && caddy validate --adapter caddyfile --config /tmp/Caddyfile'
-      < caddy/Caddyfile
-    - docker push "$CADDY_IMAGE"
-  after_script:
-    - docker logout "$CI_REGISTRY"
-    - docker builder prune -af
-
-deploy:
-  stage: deploy
-  image: alpine:3.24.1
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-  before_script:
-    - apk add --no-cache openssh-client
-    - export SSH_AUTH_SOCK=/tmp/ssh-agent.sock
-    - ssh-agent -a "$SSH_AUTH_SOCK" >/dev/null
-    - echo "$SSH_PRIVATE_KEY" | base64 -d | ssh-add -
-    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
-    - printf 'Host *\n  Port %s\n  StrictHostKeyChecking accept-new\n' "$SSH_PORT" > ~/.ssh/config
-    - chmod 600 ~/.ssh/config
-  script:
-    - ssh "$SSH_USER@$SERVER_IP" "mkdir -p $DEPLOY_PATH"
-    - scp -r docker-compose.yml caddy observability rabbitmq scripts "$SSH_USER@$SERVER_IP:$DEPLOY_PATH/"
-    - scp "$INFRA_ENV" "$SSH_USER@$SERVER_IP:$DEPLOY_PATH/.env"
-    - ssh "$SSH_USER@$SERVER_IP" "chmod 600 $DEPLOY_PATH/.env"
-    - printf '%s' "$CI_REGISTRY_PASSWORD" |
-      ssh "$SSH_USER@$SERVER_IP" "docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY"
-    - ssh "$SSH_USER@$SERVER_IP"
-      "bash '$DEPLOY_PATH/scripts/deploy-remote.sh' '$DEPLOY_PATH' '$CADDY_IMAGE' '$CI_REGISTRY'"
-  environment:
-    name: edge
-    url: "https://$PROD_DOMAIN"

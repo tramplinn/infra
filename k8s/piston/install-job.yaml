@@ -1,0 +1,88 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: piston-install
+  namespace: tramplin
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 3600
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: piston-install
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: install
+        image: python:3.14.7-alpine3.23
+        command:
+        - python
+        - -c
+        - |
+          import json
+          import os
+          import urllib.request
+          from pathlib import Path
+
+          base = os.environ['PISTON_URL'].rstrip('/') + '/api/v2'
+          packages = json.loads(Path('/config/packages.json').read_text())
+
+          def request(path, payload=None):
+              data = None if payload is None else json.dumps(payload).encode()
+              req = urllib.request.Request(base + path, data=data, headers={'Content-Type': 'application/json'})
+              with urllib.request.urlopen(req, timeout=900) as response:
+                  return json.load(response)
+
+          available = request('/packages')
+          for language, version in packages.items():
+              match = next((p for p in available if p['language'] == language and p['language_version'] == version), None)
+              if match is None:
+                  raise RuntimeError(f'Package unavailable: {language} {version}')
+              if not match['installed']:
+                  print(f'Installing {language} {version}', flush=True)
+                  request('/packages', {'language': language, 'version': version})
+              else:
+                  print(f'Already installed: {language} {version}', flush=True)
+
+          runtime_names = {'node': 'javascript', 'gcc': 'c++', 'mono': 'csharp'}
+          runtimes = {(r['language'], r['version']) for r in request('/runtimes')}
+          for language, version in packages.items():
+              if (runtime_names.get(language, language), version) not in runtimes:
+                  raise RuntimeError(f'Runtime missing after install: {language} {version}')
+          result = request('/execute', {'language': 'python', 'version': packages['python'],
+              'files': [{'content': 'print("piston-ready")'}], 'run_timeout': 3000, 'run_memory_limit': 134217728})
+          run = result.get('run', {})
+          if run.get('code') != 0 or run.get('signal') is not None or run.get('stdout', '').strip() != 'piston-ready':
+              raise RuntimeError(f'Piston execution failed: {result}')
+          print('Pinned runtimes installed; execution verified', flush=True)
+        env:
+        - name: PISTON_URL
+          value: http://piston:2000
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 25m
+            memory: 32Mi
+          limits:
+            memory: 128Mi
+        volumeMounts:
+        - name: packages
+          mountPath: /config
+          readOnly: true
+      volumes:
+      - name: packages
+        configMap:
+          name: piston-packages
