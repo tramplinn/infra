@@ -3,10 +3,10 @@
 Production-инфраструктура Tramplin в k3s: PostgreSQL/pgvector, Redis, RabbitMQ,
 Piston, постоянные тома, сетевые политики и общие секреты. Только production.
 
-- [Архитектура, настройки и эксплуатация](k8s/README.md)
-- [Подготовка и порядок первого запуска](k8s/PREDEPLOY.md)
-- [GitLab Agent и права доступа](bootstrap/gitlab-agent/README.md)
-- [Piston и автоматическая установка языков](k8s/piston/README.md)
+- [Production-манифесты](k8s/)
+- [Проверки и порядок деплоя](.gitlab-ci.yml)
+- [GitLab Agent и права доступа](bootstrap/gitlab-agent/)
+- [Piston и автоматическая установка языков](k8s/piston/)
 
 Приложения и их манифесты находятся в собственных репозиториях. Общие
 контроллеры кластера, TLS и ingress принадлежат `cluster`. Мониторинг k3s

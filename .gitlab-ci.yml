@@ -28,7 +28,6 @@ deploy-production:
     - kubectl config use-context "$KUBE_CONTEXT"
     - sed -i "s/REPLACE_PROJECT_ID/$CI_PROJECT_ID/g" k8s/secrets/store.yaml
     - kubectl apply --dry-run=server -k k8s/ >/dev/null
-    - kubectl apply --dry-run=server -f k8s/piston/install-job.yaml >/dev/null
     - kubectl -n tramplin apply -f k8s/secrets/store.yaml
     - kubectl -n tramplin wait --for=condition=Ready secretstore/gitlab-tramplin-infra --timeout=120s
     - kubectl -n tramplin apply -f k8s/secrets/external-secrets.yaml
@@ -42,6 +41,7 @@ deploy-production:
         kubectl -n tramplin rollout status "statefulset/$service" --timeout=600s
       done
     - kubectl -n tramplin delete job piston-install --ignore-not-found --wait=true --timeout=60s
+    - kubectl create --dry-run=server -f k8s/piston/install-job.yaml >/dev/null
     - kubectl create -f k8s/piston/install-job.yaml
     - |
       if ! kubectl -n tramplin wait --for=condition=Complete job/piston-install --timeout=3660s; then
