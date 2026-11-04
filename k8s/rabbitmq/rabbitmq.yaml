@@ -113,8 +113,12 @@ spec:
         - name: amqp
           containerPort: 5672
         env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
         - name: RABBITMQ_NODENAME
-          value: rabbit@rabbitmq-0.rabbitmq
+          value: rabbit@$(POD_NAME)
         - name: RABBITMQ_MNESIA_BASE
           value: /var/lib/rabbitmq/mnesia
         resources:

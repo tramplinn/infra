@@ -115,12 +115,6 @@ spec:
           capabilities:
             drop:
             - ALL
-            add:
-            - CHOWN
-            - DAC_OVERRIDE
-            - FOWNER
-            - SETGID
-            - SETUID
       volumes:
       - name: init
         configMap:
@@ -130,6 +124,11 @@ spec:
           medium: Memory
           sizeLimit: 256Mi
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        fsGroupChangePolicy: OnRootMismatch
         seccompProfile:
           type: RuntimeDefault
   volumeClaimTemplates:

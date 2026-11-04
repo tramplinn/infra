@@ -33,11 +33,18 @@ spec:
       - name: piston
         image: ghcr.io/engineer-man/piston@sha256:2f66b7456189c4d713aa986d98eccd0b6ee16d26c7ec5f21b30e942756fd127a
         command:
+        - unshare
+        - --cgroup
+        - --mount
+        - --propagation
+        - private
         - bash
         - -ec
         - |
           set -eu
-          # Never manipulate a host cgroup tree: the runtime must provide a private cgroup namespace.
+          # Remount only inside private mount/cgroup namespaces, never on the host.
+          umount /sys/fs/cgroup
+          mount -t cgroup2 cgroup2 /sys/fs/cgroup
           test "$(stat -fc %T /sys/fs/cgroup)" = cgroup2fs
           grep -qx '0::/' /proc/self/cgroup
           test -w /sys/fs/cgroup/cgroup.subtree_control
